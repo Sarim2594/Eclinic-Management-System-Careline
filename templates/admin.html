@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Careline | Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#e10f28',
+                        'primary-dark': '#b00c20',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-down { animation: slideDown 0.3s ease-out; }
+        #notification-dropdown { animation: slideDown 0.2s ease-out; }
+        .notification-item { transition: background-color 0.2s; }
+        .notification-item:hover { background-color: #f9fafb; }
+        #main-app { opacity: 0; transition: opacity 0.2s ease-in; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="main-app">
+        <div id="bulletin-banner" class="bg-red-600 border-b-4 border-red-600">
+            <div class="container mx-auto px-6 py-4">
+                <div id="bulletin-content" class="space-y-3"></div>
+            </div>
+        </div>
+
+        <nav class="bg-gradient-to-r text-black shadow-2xl" background="white">
+            <div class="container mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <img src="https://thecareline.org/wp-content/uploads/2025/10/CARELINE-1-HEARTBEAT-LOGO-01.png" alt="Careline Heartbeat Logo" class="w-36 h-11"/>
+                        <div>
+                            <h1 class="text-2xl font-bold" id="portal-name">Admin Portal</h1>
+                            <p class="text-xs text-black-200" id="user-name-display"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div class="relative">
+                            <button onclick="toggleNotifications()" class="relative p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition-all">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                                <span id="notification-badge" class="hidden absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">0</span>
+                            </button>
+                            <div id="notification-dropdown" class="hidden absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 max-h-96 overflow-y-auto">
+                                <div class="p-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                                    <h3 class="font-bold text-gray-800">Notifications</h3>
+                                    <button onclick="markAllAsRead()" class="text-sm text-primary hover:text-primary-dark">Mark all read</button>
+                                </div>
+                                <div id="notification-list" class="divide-y divide-gray-100">
+                                    <p class="text-gray-500 text-center py-8 text-sm">Loading notifications...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button onclick="logout()" class="px-4 py-2 bg-white bg-opacity-20 rounded-lg hover:bg-opacity-30 transition-all">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container mx-auto px-6 py-8" id="content-area">
+            <div id="admin-notifications" class="mb-6"></div>
+            <div class="flex gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
+                <button onclick="showAdminTab('dashboard')" id="admin-tab-dashboard" class="px-4 py-3 font-medium border-b-2 border-primary text-primary whitespace-nowrap">Dashboard</button>
+                <button onclick="showAdminTab('staff')" id="admin-tab-staff" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Staff Assignments</button>
+                <button onclick="showAdminTab('clinic')" id="admin-tab-clinic" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Create Clinic</button>
+                <button onclick="showAdminTab('receptionist')" id="admin-tab-receptionist" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Add Receptionist</button>
+                <button onclick="showAdminTab('doctor')" id="admin-tab-doctor" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Add Doctor</button>
+                <button onclick="showAdminTab('transfer')" id="admin-tab-transfer" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Transfer Doctor</button>
+                <button onclick="showAdminTab('bulletin')" id="admin-tab-bulletin" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Post Bulletin</button>
+            </div>
+            <div id="admin-message" class="hidden mb-6 p-4 rounded-lg"></div>
+            <div id="admin-dashboard-tab">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white rounded-xl shadow-lg p-6 border-l-4 border-primary"><p class="text-gray-600 text-sm">Total Clinics</p><p id="admin-stat-clinics" class="text-3xl font-bold text-gray-800">-</p></div>
+                    <div class="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500"><p class="text-gray-600 text-sm">Total Doctors</p><p id="admin-stat-doctors" class="text-3xl font-bold text-gray-800">-</p></div>
+                    <div class="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500"><p class="text-gray-600 text-sm">Total Patients</p><p id="admin-stat-patients" class="text-3xl font-bold text-gray-800">-</p></div>
+                    <div class="bg-white rounded-xl shadow-lg p-6 border-l-4 border-orange-500"><p class="text-gray-600 text-sm">Active Queue</p><p id="admin-stat-queue" class="text-3xl font-bold text-gray-800">-</p></div>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Clinic Breakdown</h3>
+                    <div class="overflow-x-auto"><table class="w-full"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-3 px-4">Clinic</th><th class="text-left py-3 px-4">Doctors</th><th class="text-left py-3 px-4">Patients</th><th class="text-left py-3 px-4">Waiting</th></tr></thead><tbody id="admin-clinic-stats"></tbody></table></div>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Doctor Performance</h3>
+                    <div class="overflow-x-auto"><table class="w-full"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-3 px-4">Doctor</th><th class="text-left py-3 px-4">Assigned Clinic</th><th class="text-left py-3 px-4">Attended</th><th class="text-left py-3 px-4">Current Queue</th></tr></thead><tbody id="admin-doctor-stats"></tbody></table></div>
+                </div>
+            </div>
+            <div id="admin-staff-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <div class="mb-6"><input type="text" id="staff-search" oninput="searchStaff()" class="w-full px-4 py-3 border border-gray-300 rounded-lg" placeholder="Search by name, username, or clinic..."></div>
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Receptionists</h3>
+                    <div class="overflow-x-auto"><table class="w-full"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-3 px-4">Name</th><th class="text-left py-3 px-4">Username</th><th class="text-left py-3 px-4">Email</th><th class="text-left py-3 px-4">Assigned Clinic</th></tr></thead><tbody id="staff-receptionists"></tbody></table></div>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Doctors</h3>
+                    <div class="overflow-x-auto"><table class="w-full"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-3 px-4">Name</th><th class="text-left py-3 px-4">Username</th><th class="text-left py-3 px-4">Email</th><th class="text-left py-3 px-4">Assigned Clinic</th></tr></thead><tbody id="staff-doctors"></tbody></table></div>
+                </div>
+            </div>
+            <div id="admin-clinic-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-6">Create New Clinic</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Clinic Name *</label><input type="text" id="admin-clinic-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Shifa Medical Center"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Location *</label><input type="text" id="admin-clinic-location" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="F-7, Islamabad"></div>
+                </div>
+                <button onclick="createClinic()" class="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">Create Clinic</button>
+            </div>
+            <div id="admin-receptionist-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-6">Add Receptionist Account</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label><input type="text" id="admin-recep-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Sarim Khan"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Username *</label><input type="text" id="admin-recep-username" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="sarim.khan"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Email *</label><input type="email" id="admin-recep-email" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="sarim@clinic.pk"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Password *</label><input type="password" id="admin-recep-password" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter password"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Contact *</label><input type="text" id="admin-recep-contact" oninput="formatPhoneInput(this)" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="+923001234567"><p class="text-xs text-gray-500 mt-1">Format: +92XXXXXXXXXX (must be 13 characters)</p></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Assign to Clinic *</label><select id="admin-recep-clinic" class="w-full px-4 py-2 border border-gray-300 rounded-lg"><option value="">Select clinic...</option></select></div>
+                </div>
+                <button onclick="createReceptionist()" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">Create Receptionist Account</button>
+            </div>
+            <div id="admin-doctor-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-6">Add Doctor Account</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label><input type="text" id="admin-doctor-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Ahmed Ali"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Username *</label><input type="text" id="admin-doctor-username" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ahmed.ali"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Email *</label><input type="email" id="admin-doctor-email" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ahmed.ali@clinic.pk"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Password *</label><input type="password" id="admin-doctor-password" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter password"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">License Number *</label><input type="text" id="admin-doctor-license" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="PMC-12345"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Contact *</label><input type="text" id="admin-doctor-contact" oninput="formatPhoneInput(this)" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="+923001234567"><p class="text-xs text-gray-500 mt-1">Format: +92XXXXXXXXXX (must be 13 characters)</p></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Assign to Clinic *</label><select id="admin-doctor-clinic" class="w-full px-4 py-2 border border-gray-300 rounded-lg"><option value="">Select clinic...</option></select></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">Availability Hours *</label><div class="flex gap-2 items-center"><input type="time" id="admin-doctor-start-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg"><span class="text-gray-600">to</span><input type="time" id="admin-doctor-end-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg"></div><p class="text-xs text-gray-500 mt-1">Example: 12:30 to 14:15</p></div>
+                    </div>
+                    <button onclick="createDoctor()" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">Create Doctor Account</button>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-6">Edit Doctor Availability</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-700 mb-2">Doctor ID *</label><input type="number" id="edit-doctor-id" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter doctor ID"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">New Start Time *</label><input type="time" id="edit-doctor-start-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 mb-2">New End Time *</label><input type="time" id="edit-doctor-end-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg"></div>
+                    </div>
+                    <button onclick="updateDoctorAvailability()" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">Update Availability</button>
+                </div>
+            </div>
+            <div id="admin-transfer-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-6">Transfer Doctor Between Clinics</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Select Doctor *</label><select id="admin-transfer-doctor" class="w-full px-4 py-2 border border-gray-300 rounded-lg"><option value="">Select doctor...</option></select></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">New Clinic *</label><select id="admin-transfer-clinic" class="w-full px-4 py-2 border border-gray-300 rounded-lg"><option value="">Select clinic...</option></select></div>
+                </div>
+                <button onclick="transferDoctor()" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">Transfer Doctor</button>
+            </div>
+            <div id="admin-bulletin-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-6">Post Health Bulletin</h3>
+                <div class="space-y-4 mb-6">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Title *</label><input type="text" id="admin-bulletin-title" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Dengue Fever Alert"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-2">Message *</label><textarea id="admin-bulletin-message" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter bulletin message..."></textarea></div>
+                </div>
+                <button onclick="postBulletin()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors">Post Bulletin</button>
+            </div>
+            </div>
+    </div>
+
+    <div id="notification-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-down">
+            <div class="text-center mb-6">
+                <div id="notif-icon" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"></div>
+                <h3 id="notif-title" class="text-2xl font-bold text-gray-800 mb-2"></h3>
+                <p id="notif-message" class="text-gray-600"></p>
+            </div>
+            <button onclick="closePopUp()" class="w-full px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">Got it!</button>
+        </div>
+    </div>
+
+    <script src="/static/shared.js"></script>
+    <script src="/static/admin.js"></script>
+</body>
+</html>

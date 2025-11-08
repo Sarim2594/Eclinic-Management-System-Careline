@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.requests import Request
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import hashlib
@@ -89,8 +90,8 @@ async def source_map(path: str):
 # ============================================================================
 
 @app.post("/api/auth/login")
-def login_helper(credentials: LoginRequest):
-    """Authenticate user with username/email and password"""
+def login_helper(credentials: LoginRequest, response: Response):
+    """Authenticate user with username/email and password and set secure cookie"""
     try:
         password_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
         
@@ -104,7 +105,22 @@ def login_helper(credentials: LoginRequest):
             user = cursor.fetchone()
             
             if not user:
-                raise HTTPException(status_code=401, detail="Invalid credentials")        
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            
+            # Determine the user's home URL for the redirect
+            role = user['role']
+            redirect_url = f"/{role}"   
+            
+            user_cookie_data = f"id={credentials.username_or_email.split("@")[0]}&role={role}"
+            response.set_cookie(
+                key="session", 
+                value=user_cookie_data,
+                secure=True, 
+                path="/",
+                httponly=True, 
+                samesite="lax", 
+                max_age=3600 # 1 hour
+            )
             
             response_data = {
                 "success": True,
@@ -112,6 +128,7 @@ def login_helper(credentials: LoginRequest):
                 "user_id": user['id'],
                 "username": user['username'],
                 "email": user['email'],
+                "redirect_url": redirect_url
             }
             
             user_id = user['id']
@@ -337,29 +354,71 @@ async def mark_all_notifications_read(role: str, user_id: Optional[int] = None):
 # FRONTEND HTML
 # ============================================================================
 
-@app.get("/", response_class=HTMLResponse)
-async def get_frontend():
-    """Serve the frontend HTML"""
+def serve_html(file_name: str):
+    """Helper function to serve an HTML file"""
     try:
-        with open("templates/index.html", "r", encoding="utf-8") as f:
-            return f.read()
+        with open(f"templates/{file_name}", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(
-            content="<h1>Frontend not found. Please ensure templates/index.html exists.</h1>", 
+            content=f"<h1>Frontend not found: {file_name}</h1>", 
             status_code=404
         )
 
-@app.get("/static/app.js")
-async def get_app_js():
-    """Serve the JavaScript file"""
+@app.get("/", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse)
+async def get_login_page():
+    # We will let login.js handle redirecting if already logged in
+    return serve_html("login.html")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def get_admin_page():
+    return serve_html("admin.html")
+
+@app.get("/doctor", response_class=HTMLResponse)
+async def get_doctor_page():
+    return serve_html("doctor.html")
+
+@app.get("/receptionist", response_class=HTMLResponse)
+async def get_receptionist_page():
+    return serve_html("receptionist.html")
+
+# ============================================================================
+# FRONTEND JAVASCRIPT
+# ============================================================================
+
+def serve_js(file_name: str):
+    """Helper function to serve a JS file"""
     try:
-        return FileResponse("static/app.js", media_type="application/javascript")
+        return FileResponse(f"static/{file_name}", media_type="application/javascript")
     except FileNotFoundError:
         return Response(
-            content="// JavaScript file not found", 
+            content=f"// JS file not found: {file_name}", 
             media_type="application/javascript", 
             status_code=404
         )
+
+@app.get("/static/login.js")
+async def get_login_js():
+    return serve_js("login.js")
+
+@app.get("/static/shared.js")
+async def get_shared_js():
+    return serve_js("shared.js")
+
+@app.get("/static/admin.js")
+async def get_admin_js():
+    return serve_js("admin.js")
+
+@app.get("/static/doctor.js")
+async def get_doctor_js():
+    return serve_js("doctor.js")
+
+@app.get("/static/receptionist.js")
+async def get_receptionist_js():
+    return serve_js("receptionist.js")
+
 
 # ============================================================================
 # RUN APPLICATION
