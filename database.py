@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Database:
-    """PostgreSQL Database Handler with Connection Pooling (3NF)"""
+    """PostgreSQL Database Handler with Connection Pooling"""
     
     def __init__(self):
         try:
@@ -145,8 +145,8 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
                     day_of_week INTEGER NOT NULL CHECK (day_of_week >= 1 AND day_of_week <= 7),
-                    start_time TIME NOT NULL,
-                    end_time TIME NOT NULL,
+                    start_time TIME,
+                    end_time TIME,
                     is_active BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

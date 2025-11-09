@@ -1,7 +1,7 @@
 import datetime
 from fastapi import APIRouter, HTTPException, status, Request
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Optional, List
 import traceback
 import hashlib
 import re
@@ -24,7 +24,7 @@ class ReceptionistCreate(BaseModel):
     contact: str
     clinic_id: int
     
-    @field_validator('email')
+    @field_validator('email', mode='before')
     @classmethod
     def validate_email(cls, v):
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
@@ -46,9 +46,8 @@ class DoctorCreate(BaseModel):
     license_number: str
     contact: str
     clinic_id: int
-    specialization: Optional[str] = "General Physician"
-    availability_start: str
-    availability_end: str
+    startTimes: List[Optional[str]]
+    endTimes: List[Optional[str]]
     
     @field_validator('email')
     @classmethod
@@ -73,8 +72,9 @@ class DoctorTransfer(BaseModel):
     new_clinic_id: int
 
 class AvailabilityUpdate(BaseModel):
-    start_time: str
-    end_time: str
+    day_of_week: int
+    startTime: Optional[str]
+    endTime: Optional[str]
 
 # ============================================================================
 # ADMIN ENDPOINTS
@@ -290,6 +290,7 @@ async def create_doctor(doctor: DoctorCreate, request: Request):
     try:
         with db.get_cursor() as cursor:
             # Check if username/email already exists
+            
             cursor.execute("""
                 SELECT id FROM users 
                 WHERE username = %s OR email = %s
@@ -329,20 +330,19 @@ async def create_doctor(doctor: DoctorCreate, request: Request):
             
             # Create doctor profile
             cursor.execute("""
-                INSERT INTO doctors (user_id, clinic_id, name, license_number, contact, specialization)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO doctors (user_id, clinic_id, name, license_number, contact)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
             """, (user_id, doctor.clinic_id, doctor.name, doctor.license_number, 
-                  doctor.contact, doctor.specialization))
+                  doctor.contact))
             
             doctor_id = cursor.fetchone()['id']
             
-            # Create availability schedule for weekdays (Monday to Friday)
-            for day in range(1, 6):  # Monday=1 to Friday=5
+            for day in range(1, 8):  # Monday=1 to Sunday=7
                 cursor.execute("""
                     INSERT INTO availability_schedules (doctor_id, day_of_week, start_time, end_time)
                     VALUES (%s, %s, %s, %s)
-                """, (doctor_id, day, doctor.availability_start, doctor.availability_end))
+                """, (doctor_id, day, doctor.startTimes[day-1], doctor.endTimes[day-1]))
             
             return {
                 "success": True,
@@ -350,9 +350,6 @@ async def create_doctor(doctor: DoctorCreate, request: Request):
                 "user_id": user_id,
                 "message": "Doctor account created successfully"
             }
-    
-    except HTTPException:
-        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -371,12 +368,12 @@ async def update_availability(doctor_id: int, data: AvailabilityUpdate, request:
             if not doctor:
                 raise HTTPException(status_code=404, detail="Doctor not found")
             
-            # Update all availability schedules for this doctor
             cursor.execute("""
                 UPDATE availability_schedules
                 SET start_time = %s, end_time = %s, updated_at = CURRENT_TIMESTAMP
-                WHERE doctor_id = %s
-            """, (data.start_time, data.end_time, doctor_id))
+                WHERE doctor_id = %s 
+                AND day_of_week = %s
+            """, (data.startTime, data.endTime, doctor_id, data.day_of_week))
             
             modified_count = cursor.rowcount
             

@@ -1411,13 +1411,54 @@ function getAdminHTML() {
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Availability Hours *</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Monday Availability Hours *</label>
                         <div class="flex gap-2 items-center">
-                            <input type="time" id="admin-doctor-start-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <input type="time" id="admin-doctor-start-time-monday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                             <span class="text-gray-600">to</span>
-                            <input type="time" id="admin-doctor-end-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <input type="time" id="admin-doctor-end-time-monday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         </div>
-                        <p class="text-xs text-gray-500 mt-1">Example: 12:30 to 14:15</p>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Tuesday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-tuesday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-tuesday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Wednesday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-wednesday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-wednesday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Thursday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-thursday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-thursday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Friday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-friday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-friday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Saturday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-saturday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-saturday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        <p></p>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Sunday Availability Hours *</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="time" id="admin-doctor-start-time-sunday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <span class="text-gray-600">to</span>
+                            <input type="time" id="admin-doctor-end-time-sunday" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        </div>
                     </div>
                 </div>
                 <button onclick="createDoctor()" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">Create Doctor Account</button>
@@ -1426,9 +1467,13 @@ function getAdminHTML() {
             <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
                 <h3 class="text-xl font-bold text-gray-800 mb-6">Edit Doctor Availability</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div class="md:col-span-2">
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Doctor ID *</label>
                         <input type="number" id="edit-doctor-id" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter doctor ID">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Day *</label>
+                        <input type="number" id="edit-doctor-day" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter day (1=Monday, 7=Sunday)" min="0" max="6" step="1">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">New Start Time *</label>
@@ -1758,17 +1803,43 @@ async function createDoctor() {
     const license = document.getElementById('admin-doctor-license') ? document.getElementById('admin-doctor-license').value.trim() : '';
     const contact = document.getElementById('admin-doctor-contact') ? document.getElementById('admin-doctor-contact').value.trim() : '';
     const clinic_id = document.getElementById('admin-doctor-clinic') ? document.getElementById('admin-doctor-clinic').value : '';
-    const startTime = document.getElementById('admin-doctor-start-time') ? document.getElementById('admin-doctor-start-time').value : '';
-    const endTime = document.getElementById('admin-doctor-end-time') ? document.getElementById('admin-doctor-end-time').value : '';
+    const days = [
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday'
+    ];
+    const startTimes = days.map(day =>
+    document.getElementById(`admin-doctor-start-time-${day}`)
+        ? document.getElementById(`admin-doctor-start-time-${day}`).value
+        : null
+    );
+    const endTimes = days.map(day =>
+    document.getElementById(`admin-doctor-end-time-${day}`)
+        ? document.getElementById(`admin-doctor-end-time-${day}`).value
+        : null
+    );
 
     if (!name || !username || !email || !password || !license || !contact || !clinic_id) { 
         showPopUp('Missing Fields', 'Please fill all doctor fields', 'error'); return; 
     }
     if (!validateEmail(email)) { showPopUp('Invalid Email', 'Please provide a valid email', 'error'); return; }
     if (!validatePhone(contact)) { showPopUp('Invalid Phone', 'Contact must be in +92XXXXXXXXXX format', 'error'); return; }
+    for (let i = 0; i < days.length; i++) {
+        if (startTimes[i]==="" && endTimes[i]==="") {
+            startTimes[i] = null;
+            endTimes[i] = null;
+        } else if (startTimes[i] === "" || endTimes[i] === "") {
+            showPopUp('Invalid Availability', `Please provide both start and end times for ${days[i].charAt(0).toUpperCase() + days[i].slice(1)} or leave both empty`, 'error');
+            return;
+        }
+    }
 
     try {
-        const res = await fetch(`${API_URL}/admin/create-doctor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, email, password, license_number: license, contact, clinic_id }) });
+        const res = await fetch(`${API_URL}/admin/create-doctor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, email, password, license_number: license, contact, clinic_id, startTimes, endTimes }) });
         const data = await res.json();
         if (data.success) { 
             showPopUp('Doctor Created', 'Account created successfully', 'success'); loadStaffAssignments().catch(() => {}); 
@@ -1787,9 +1858,10 @@ async function createDoctor() {
 async function updateDoctorAvailability() {
     const doctorId = document.getElementById('edit-doctor-id').value;
     const startTime = document.getElementById('edit-doctor-start-time').value;
+    const day_of_week = document.getElementById('edit-doctor-day').value;
     const endTime = document.getElementById('edit-doctor-end-time').value;
 
-    if (!doctorId || !startTime || !endTime) {
+    if (!doctorId || !day_of_week) {
         showPopUp("Missing Fields", "Please fill all fields to update availability", "error");
         return;
     }
@@ -1797,7 +1869,7 @@ async function updateDoctorAvailability() {
     const res = await fetch(`/api/admin/update-availability/${doctorId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startTime, endTime })
+        body: JSON.stringify({ day_of_week, startTime, endTime })
     });
     const data = await res.json();
 
@@ -1809,6 +1881,7 @@ async function updateDoctorAvailability() {
     }
     
     document.getElementById('edit-doctor-id').value = '';
+    document.getElementById('edit-doctor-day').value = '';
     document.getElementById('edit-doctor-start-time').value = '';
     document.getElementById('edit-doctor-end-time').value = '';
 }
