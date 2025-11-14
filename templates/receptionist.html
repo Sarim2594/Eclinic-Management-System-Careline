@@ -1,0 +1,104 @@
+<div class="flex gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
+    <button onclick="showReceptionistTab('register')" id="tab-register" class="px-4 py-3 font-medium border-b-2 border-primary text-primary whitespace-nowrap">Register Patient</button>
+    <button onclick="showReceptionistTab('diagnosis')" id="tab-diagnosis" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 hover:border-gray-300 whitespace-nowrap">Previous Diagnoses</button>
+</div>
+
+<div id="recep-message" class="hidden mb-6 p-4 rounded-lg"></div>
+
+    <div id="register-tab" class="bg-white rounded-xl shadow-lg p-6">
+        <h3 class="text-xl font-bold text-gray-800 mb-6">Register New Patient</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">MR Number *</label>
+                <input type="number" id="patient-mr" class="w-full px-4 py-2 border border-gray-300 rounded-lg" min="1" placeholder="1001">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Patient Name *</label>
+                <input type="text" id="patient-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Muhammad Ali">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Age *</label>
+                <input type="number" id="patient-age" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="35" min="1" step="1">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Gender *</label>
+                <select id="patient-gender" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Father Name *</label>
+                <input type="text" id="patient-father-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Muhammad Raza">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Marital Status *</label>
+                <select id="patient-marital-status" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <option value="Single">Single</option>
+                    <option value="Married">Married</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Contact Number *</label>
+                <input type="text" id="patient-contact" oninput="formatPhoneInput(this)" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="300-1234567" value="+92 ">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Email Address *</label>
+                <input type="text" id="patient-email" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="patient@example.com">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                <input type="text" id="patient-address" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">CNIC *</label>
+                <input type="text" id="patient-cnic" oninput="formatCNICInput(this)" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="42101-1234567-1">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Occupation</label>
+                <input type="text" id="patient-occupation" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Nationality *</label>
+                <input type="text" id="patient-nationality" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <button onclick="registerPatient()" class="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">Register Patient & Print Ticket</button>
+        </div>
+    </div>
+    
+    <div id="diagnosis-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+        <h3 class="text-xl font-bold text-gray-800 mb-6">Previous Diagnoses</h3>
+        
+        <div class="mb-6">
+            <input type="text" id="past-diagnoses-search" 
+                oninput="searchPastDiagnoses(this.value)" 
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg" 
+                placeholder="Search by name, contact, patient ID, age, or gender...">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="start-date" class="block text-sm font-medium text-gray-700 mt-2">Start Date</label>
+                    <input type="date" id="start-date" 
+                        onchange="searchPastDiagnoses()" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label for="end-date" class="block text-sm font-medium text-gray-700 mt-2">End Date</label>
+                    <input type="date" id="end-date" 
+                        onchange="searchPastDiagnoses()" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+        </div>
+
+        <div id="diagnosis-loading" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <p class="mt-2 text-gray-600">Loading diagnoses...</p>
+        </div>
+        
+        <div id="diagnosis-list" class="space-y-4"></div>
+        
+        <p id="no-diagnosis-message" class="hidden text-gray-500 text-center py-8">No diagnosis data available.</p>
+    </div>
+</div>

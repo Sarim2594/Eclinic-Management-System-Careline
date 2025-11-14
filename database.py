@@ -96,8 +96,15 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     age INTEGER NOT NULL CHECK (age >= 0 AND age <= 150),
-                    gender VARCHAR(10) NOT NULL CHECK (gender IN ('Male', 'Female', 'Other')),
+                    gender VARCHAR(10) NOT NULL CHECK (gender IN ('Male', 'Female')),
+                    father_name VARCHAR(255) NOT NULL,
+                    marital_status VARCHAR(10) NOT NULL CHECK (marital_status IN ('Married', 'Single')),
                     contact VARCHAR(20) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    address VARCHAR(255) NOT NULL,
+                    cnic VARCHAR(20) UNIQUE NOT NULL,
+                    occupation VARCHAR(100),
+                    nationality VARCHAR(50) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -259,17 +266,17 @@ class Database:
             
             users_data = [
                 # Admin
-                ('muhammad.yasir', 'muhammad.yasir@clinic.pk', admin_pass, 'admin'),
-                ('junaid.ahmed', 'junaid.ahmed@clinic.pk', admin_pass, 'admin'),
-                ('sarim.khan', 'sarim.khan@clinic.pk', admin_pass, 'admin'),
+                ('muhammad.yasir', 'muhammad.yasir@careline.org', admin_pass, 'admin'),
+                ('junaid.ahmed', 'junaid.ahmed@careline.org', admin_pass, 'admin'),
+                ('sarim.khan', 'sarim.khan@careline.org', admin_pass, 'admin'),
                 # Doctors
-                ('ahmed.ali', 'ahmed.ali@clinic.pk', doc_pass, 'doctor'),
-                ('fatima.hassan', 'fatima.hassan@clinic.pk', doc_pass, 'doctor'),
-                ('sara.khan', 'sara.khan@clinic.pk', doc_pass, 'doctor'),
+                ('ahmed.ali', 'ahmed.ali@careline.org', doc_pass, 'doctor'),
+                ('fatima.hassan', 'fatima.hassan@careline.org', doc_pass, 'doctor'),
+                ('sara.khan', 'sara.khan@careline.org', doc_pass, 'doctor'),
                 # Receptionists
-                ('syed.ammar', 'syed.ammar@clinic.pk', recep_pass, 'receptionist'),
-                ('zainab.malik', 'zainab.malik@clinic.pk', recep_pass, 'receptionist'),
-                ('hina.tariq', 'hina.tariq@clinic.pk', recep_pass, 'receptionist')
+                ('syed.ammar', 'syed.ammar@careline.org', recep_pass, 'receptionist'),
+                ('zainab.malik', 'zainab.malik@careline.org', recep_pass, 'receptionist'),
+                ('hina.tariq', 'hina.tariq@careline.org', recep_pass, 'receptionist')
             ]
             
             cursor.executemany("""
@@ -316,18 +323,18 @@ class Database:
             # ============= AVAILABILITY SCHEDULES =============
             availability_data = []
             
-            # Ahmed Ali (id=1) - Monday to Friday, 09:00-17:00
             for day in range(1, 6):
                 availability_data.append((1, day, '09:00', '17:00'))
+            availability_data.append((1, 6, None, None))
+            availability_data.append((1, 7, None, None))
             
-            # Fatima Hassan (id=2) - Monday to Saturday
-            for day in range(1, 6):
-                availability_data.append((2, day, '18:00', '5:00'))
-            availability_data.append((2, 6, '18:00', '3:00'))
+            for day in range(1, 7):
+                availability_data.append((2, day, '17:00', '5:00'))
+            availability_data.append((2, 7, '17:00', '3:00'))
             
-            # Sara Khan (id=3) - Tuesday to Saturday, 14:00-20:00
-            for day in range(2, 7):
+            for day in range(2, 8):
                 availability_data.append((3, day, '13:45', '20:00'))
+            availability_data.append((3, 1, None, None))
             
             cursor.executemany("""
                 INSERT INTO availability_schedules (doctor_id, day_of_week, start_time, end_time) 

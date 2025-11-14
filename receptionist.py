@@ -6,10 +6,16 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
+from fastapi import APIRouter, UploadFile, Form
 from pydantic import BaseModel, field_validator
-from reportlab.lib.pagesizes import mm
-from reportlab.lib.units import mm
-from reportlab.lib.colors import Color, black, lightgrey
+
+import os
+import smtplib
+from dotenv import load_dotenv
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 
 try:
     from reportlab.pdfgen import canvas
@@ -21,31 +27,68 @@ except Exception:
 
 router = APIRouter()
 
+load_dotenv()
+
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT"))
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
+
 # ============================================================================
 # PYDANTIC MODELS WITH VALIDATION
 # ============================================================================
 
 class PatientCreate(BaseModel):
+    mr: int
     name: str
     age: int
     gender: str
+    father_name: str
+    marital_status: str
     contact: str
+    email: str
+    address: str
+    cnic: str
+    occupation: Optional[str]
+    nationality: str
     clinic_id: int
 
-    @field_validator('contact')
-    @classmethod
-    def validate_contact(cls, v):
-        if not re.match(r'^\+92\d{10}$', v):
-            raise ValueError('Contact must be in format: +92XXXXXXXXXX')
-        return v
+class VitalsModel(BaseModel):
+    blood_pressure: str
+    heart_rate: float
+    temperature: float
+    blood_oxygen: float
+    weight: float
+    height: float
+    bmi: float
 
-    @field_validator('age')
-    @classmethod
-    def validate_age(cls, v):
-        if v < 0 or v > 150:
-            raise ValueError('Age must be between 0 and 150')
-        return v
+class DiagnosisDataModel(BaseModel):
+    appointment_id: int
+    patient_id: int
+    patient_mr: str
+    patient_name: str
+    age: int
+    gender: str
+    contact: str
+    father_name: str
+    marital_status: str
+    cnic: str
+    address: str
+    occupation: Optional[str] = "-"
+    nationality: str
+    doctor_name: str
+    diagnosed_date: str
+    vitals: VitalsModel
+    diagnosis: str
+    prescription: str
+    notes: Optional[str] = "-"
+    clinic_name: str
 
+class EmailRequest(BaseModel):
+    email: str
+    patient_name: str
+    html: str
+    
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -76,88 +119,6 @@ def is_doctor_available(doctor_id: int, db) -> bool:
         else:
             # Overnight shift
             return current_time >= start_time or current_time <= end_time
-
-def generate_ticket_text(patient_id: int, ticket_no: int, patient_name: str, clinic_name: str, doctor_name: str):
-    """Generate simple text ticket"""
-    ticket_text = f"""
-Clinic: {clinic_name}
-
-QUEUE NUMBER: {ticket_no:03d}
-
-Patient: {patient_name}
-Patient ID: {patient_id}
-Doctor: {doctor_name}
-Time: {datetime.datetime.now().strftime('%I:%M %p')}
-Date: {datetime.datetime.now().strftime('%d-%m-%Y')}
-
-Please wait for your number to be called.
-"""
-    return ticket_text
-
-def generate_ticket_pdf(patient_id: int, ticket_no: int, patient_name: str, clinic_name: str, doctor_name: str):
-    """Generate PDF ticket or fallback to text"""
-    buffer = io.BytesIO()
-    if not _HAS_PDF:
-        txt = generate_ticket_text(patient_id, ticket_no, patient_name, clinic_name, doctor_name)
-        buffer.write(txt.encode())
-        buffer.seek(0)
-        return buffer
-
-    try:
-        PAGE_WIDTH, PAGE_HEIGHT = 80 * mm, 120 * mm
-        p = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT))
-
-        # Watermark
-        p.saveState()
-        p.setFont("Helvetica-Bold", 26)
-        p.setFillColor(Color(0.9, 0.9, 0.9, alpha=0.6))
-        p.translate(PAGE_WIDTH / 2, PAGE_HEIGHT / 2)
-        p.rotate(45)
-        p.drawCentredString(0, 0, "CareLine")
-        p.restoreState()
-
-        # Border
-        p.setStrokeColor(lightgrey)
-        p.rect(5 * mm, 5 * mm, PAGE_WIDTH - 10 * mm, PAGE_HEIGHT - 10 * mm, stroke=True, fill=False)
-
-        # Ticket Number
-        p.setFont("Helvetica-Bold", 36)
-        p.setFillColor(black)
-        p.drawCentredString(PAGE_WIDTH / 2, PAGE_HEIGHT - 40 * mm, f"{ticket_no}")
-
-        # Divider
-        p.setLineWidth(1)
-        p.line(10 * mm, PAGE_HEIGHT - 45 * mm, PAGE_WIDTH - 10 * mm, PAGE_HEIGHT - 45 * mm)
-
-        # Patient Info
-        p.setFont("Helvetica", 12)
-        p.drawCentredString(PAGE_WIDTH / 2, PAGE_HEIGHT - 55 * mm, f"{patient_name}")
-        p.drawCentredString(PAGE_WIDTH / 2, PAGE_HEIGHT - 62 * mm, f"ID: {patient_id}")
-
-        # Time
-        p.setFont("Helvetica-Oblique", 10)
-        p.setFillColorRGB(0.3, 0.3, 0.3)
-        p.drawCentredString(
-            PAGE_WIDTH / 2,
-            PAGE_HEIGHT - 75 * mm,
-            f"Time: {datetime.datetime.now().strftime('%d-%m-%y %I:%M %p')}"
-        )
-
-        # Footer
-        p.setFont("Helvetica", 8)
-        p.setFillColorRGB(0.5, 0.5, 0.5)
-        p.drawCentredString(PAGE_WIDTH / 2, 10 * mm, "Please wait for your turn")
-
-        p.showPage()
-        p.save()
-        buffer.seek(0)
-        return buffer
-    except Exception:
-        txt = generate_ticket_text(patient_id, ticket_no, patient_name, clinic_name, doctor_name)
-        buffer = io.BytesIO()
-        buffer.write(txt.encode())
-        buffer.seek(0)
-        return buffer
 
 # ============================================================================
 # RECEPTIONIST ENDPOINTS
@@ -277,7 +238,7 @@ async def register_patient(patient: PatientCreate, request: Request):
             selected = random.choice(candidates)
 
             # Check if patient already exists
-            cursor.execute("SELECT id FROM patients WHERE contact = %s", (patient.contact,))
+            cursor.execute("SELECT id FROM patients WHERE id = %s", (patient.mr,))
             existing_patient = cursor.fetchone()
             
             if existing_patient:
@@ -320,12 +281,9 @@ async def register_patient(patient: PatientCreate, request: Request):
 
             # Create new patient
             cursor.execute("""
-                INSERT INTO patients (name, age, gender, contact)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id
-            """, (patient.name, patient.age, patient.gender, patient.contact))
-            
-            patient_id = cursor.fetchone()['id']
+                INSERT INTO patients (id, name, age, gender, father_name, marital_status, contact, email, address, cnic, occupation, nationality)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (patient.mr, patient.name, patient.age, patient.gender, patient.father_name, patient.marital_status, patient.contact, patient.email, patient.address, patient.cnic, patient.occupation, patient.nationality))
 
             # Create appointment
             cursor.execute("""
@@ -333,7 +291,7 @@ async def register_patient(patient: PatientCreate, request: Request):
                 (patient_id, doctor_id, clinic_id, ticket_no, status)
                 VALUES (%s, %s, %s, %s, 'waiting')
                 RETURNING id
-            """, (patient_id, selected['doctor_id'], patient.clinic_id, ticket_no))
+            """, (patient.mr, selected['doctor_id'], patient.clinic_id, ticket_no))
 
             cursor.execute("""
                 INSERT INTO notifications (
@@ -348,7 +306,7 @@ async def register_patient(patient: PatientCreate, request: Request):
             """, (
                 'doctor',
                 selected['doctor_id'],
-                patient_id,
+                patient.mr,
                 'new_patient',
                 'New Patient Assigned',
                 f'New patient {patient.name} (Ticket #{ticket_no}) has been assigned to you.'
@@ -356,7 +314,7 @@ async def register_patient(patient: PatientCreate, request: Request):
 
             return {
                 'success': True,
-                'patient_id': patient_id,
+                'patient_id': patient.mr,
                 'ticket_no': ticket_no,
                 'doctor_name': selected['doctor_name'],
                 'clinic_name': clinic['name'],
@@ -371,70 +329,52 @@ async def register_patient(patient: PatientCreate, request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
 
-@router.get('/download-ticket/{patient_id}')
-async def download_ticket(patient_id: int, request: Request):
-    """Generate and download patient ticket as PDF"""
+@router.get('/get-diagnoses')
+async def get_diagnoses(request: Request):
+    """Fetch list of diagnoses"""
     try:
         db = request.app.state.db
         
         with db.get_cursor() as cursor:
-            # Get patient
-            cursor.execute("SELECT id, name FROM patients WHERE id = %s", (patient_id,))
-            patient = cursor.fetchone()
-            
-            if not patient:
-                raise HTTPException(status_code=404, detail='Patient not found')
-
-            # Get latest waiting appointment
             cursor.execute("""
-                SELECT a.id, a.ticket_no, a.clinic_id, a.doctor_id
-                FROM appointments a
-                WHERE a.patient_id = %s AND a.status = 'waiting'
-                ORDER BY a.created_at DESC
-                LIMIT 1
-            """, (patient_id,))
-            
-            appointment = cursor.fetchone()
-            
-            if not appointment:
-                raise HTTPException(
-                    status_code=404, 
-                    detail='No active appointment found for this patient'
-                )
-
-            # Get clinic and doctor details
-            cursor.execute("SELECT name FROM clinics WHERE id = %s", (appointment['clinic_id'],))
-            clinic = cursor.fetchone()
-            
-            cursor.execute("SELECT name FROM doctors WHERE id = %s", (appointment['doctor_id'],))
-            doctor = cursor.fetchone()
-
-            pdf_buffer = generate_ticket_pdf(
-                patient_id=patient_id,
-                ticket_no=appointment['ticket_no'],
-                patient_name=patient['name'],
-                clinic_name=clinic['name'] if clinic else '',
-                doctor_name=doctor['name'] if doctor else ''
-            )
-
-            if not _HAS_PDF:
-                return Response(
-                    content=pdf_buffer.getvalue(), 
-                    media_type='text/plain', 
-                    headers={
-                        'Content-Disposition': f'attachment; filename=ticket_{appointment["ticket_no"]}.txt'
-                    }
-                )
-
-            return StreamingResponse(
-                pdf_buffer, 
-                media_type='application/pdf', 
-                headers={
-                    'Content-Disposition': f'attachment; filename=ticket_{appointment["ticket_no"]}.pdf'
-                }
-            )
-
-    except HTTPException:
-        raise
+                           SELECT a.id as appointment_id, a.patient_id as patient_mr, p.name as patient_name, p.age, p.gender, p.father_name, p.contact, p.marital_status, p.email, p.address, p.cnic, p.occupation, p.nationality, d.name as doctor_name, a.vitals, a.diagnosis, a.prescription, a.notes, a.updated_at as diagnosed_date
+                           FROM appointments a
+                           JOIN patients p ON a.patient_id = p.id
+                           JOIN doctors d ON a.doctor_id = d.id
+                           WHERE a.status = 'completed'
+                           """)
+            diagnoses = cursor.fetchall()
+            return { "success": True, "diagnoses": diagnoses }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
+
+class EmailRequest(BaseModel):
+    email: str
+    patient_name: str
+    html: str
+
+
+@router.post("/email-diagnosis")
+async def email_diagnosis_html(request: EmailRequest):
+    try:
+        message = MIMEMultipart("alternative")
+        message["From"] = EMAIL_USER
+        message["To"] = request.email
+        message["Subject"] = f"Diagnosis Report - {request.patient_name}"
+
+        # HTML replaces entire email body
+        html_part = MIMEText(request.html, "html")
+        message.attach(html_part)
+
+        # Send
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, request.email, message.as_string())
+
+        return {"success": True}
+
+    except Exception as e:
+        print("EMAIL ERROR:", e)
+        return {"success": False, "error": str(e)}
+

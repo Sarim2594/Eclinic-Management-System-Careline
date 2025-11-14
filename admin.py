@@ -5,6 +5,8 @@ from typing import Optional, List
 import traceback
 import hashlib
 import re
+from datetime import datetime, timedelta, time
+from utils.reminder_email import send_reminder_email
 
 router = APIRouter()
 
@@ -23,20 +25,6 @@ class ReceptionistCreate(BaseModel):
     password: str
     contact: str
     clinic_id: int
-    
-    @field_validator('email', mode='before')
-    @classmethod
-    def validate_email(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
-            raise ValueError('Invalid email format')
-        return v
-
-    @field_validator('contact')
-    @classmethod
-    def validate_contact(cls, v):
-        if not re.match(r'^\+92\d{10}$', v):
-            raise ValueError('Contact must be in format: +92XXXXXXXXXX')
-        return v
 
 class DoctorCreate(BaseModel):
     name: str
@@ -48,20 +36,6 @@ class DoctorCreate(BaseModel):
     clinic_id: int
     startTimes: List[Optional[str]]
     endTimes: List[Optional[str]]
-    
-    @field_validator('email')
-    @classmethod
-    def validate_email(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
-            raise ValueError('Invalid email format')
-        return v
-
-    @field_validator('contact')
-    @classmethod
-    def validate_contact(cls, v):
-        if not re.match(r'^\+92\d{10}$', v):
-            raise ValueError('Contact must be in format: +92XXXXXXXXXX')
-        return v
 
 class BulletinCreate(BaseModel):
     title: str
@@ -82,7 +56,7 @@ class AvailabilityUpdate(BaseModel):
 
 @router.get("/statistics")
 async def get_statistics(request: Request):
-    """Get comprehensive system statistics (3NF)"""
+    """Get comprehensive system statistics"""
     try:
         db = request.app.state.db
         
@@ -141,7 +115,7 @@ async def get_statistics(request: Request):
             doctor_stats = cursor.fetchall()
             
             # Average waiting time (today)
-            today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             cursor.execute("""
                 SELECT AVG(EXTRACT(EPOCH FROM (ended_at - created_at))/60) as avg_minutes
                 FROM appointments
@@ -170,7 +144,7 @@ async def get_statistics(request: Request):
 
 @router.get("/receptionists")
 async def get_receptionists(request: Request):
-    """Get all receptionist accounts (3NF)"""
+    """Get all receptionist accounts"""
     db = request.app.state.db
     
     try:
@@ -201,9 +175,61 @@ async def get_receptionists(request: Request):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/available-doctors")
+async def get_available_doctors(request: Request):
+    """Get all doctors who have at least one day with availability set"""
+    db = request.app.state.db
+    
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                WITH ActiveDoctorsSchedule AS (
+                    SELECT
+                        doctor_id,
+                        end_time
+                    FROM
+                        availability_schedules
+                    WHERE
+                        is_active = TRUE 
+                ),
+                DoctorQueueCount AS (
+                    SELECT 
+                        doctor_id, 
+                        COUNT(id) AS queue_count
+                    FROM appointments
+                    WHERE status = 'waiting'
+                    GROUP BY doctor_id
+                )
+                SELECT
+                    d.name,
+                    c.name AS clinic_name,
+                    COALESCE(q.queue_count, 0) AS currently_waiting,
+                    s.end_time
+                FROM
+                    doctors d
+                JOIN
+                    clinics c ON d.clinic_id = c.id
+                INNER JOIN
+                    ActiveDoctorsSchedule s ON d.id = s.doctor_id 
+                LEFT JOIN
+                    DoctorQueueCount q ON d.id = q.doctor_id
+                ORDER BY
+                    currently_waiting ASC, d.name ASC;
+            """)
+            
+            doctors = cursor.fetchall()
+        
+            return {
+                "success": True,
+                "available_doctors": doctors
+            }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/create-clinic")
 async def create_clinic(clinic: ClinicCreate, request: Request):
-    """Create a new clinic (3NF with auto-increment PK)"""
+    """Create a new clinic"""
     try:
         db = request.app.state.db
         
@@ -227,7 +253,7 @@ async def create_clinic(clinic: ClinicCreate, request: Request):
 
 @router.post("/create-receptionist")
 async def create_receptionist(receptionist: ReceptionistCreate, request: Request):
-    """Create a new receptionist account (3NF with auto-increment PK)"""
+    """Create a new receptionist account"""
     db = request.app.state.db
     
     try:
@@ -284,7 +310,7 @@ async def create_receptionist(receptionist: ReceptionistCreate, request: Request
 
 @router.post("/create-doctor")
 async def create_doctor(doctor: DoctorCreate, request: Request):
-    """Create a new doctor account (3NF with auto-increment PK)"""
+    """Create a new doctor account"""
     db = request.app.state.db
     
     try:
@@ -356,7 +382,7 @@ async def create_doctor(doctor: DoctorCreate, request: Request):
 
 @router.put("/update-availability/{doctor_id}")
 async def update_availability(doctor_id: int, data: AvailabilityUpdate, request: Request):
-    """Update doctor's availability hours for all their schedules (3NF)"""
+    """Update doctor's availability hours for all their schedules"""
     db = request.app.state.db
     
     try:
@@ -386,9 +412,54 @@ async def update_availability(doctor_id: int, data: AvailabilityUpdate, request:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+@router.get("/monitor-doctors")
+async def monitor_doctors(request: Request):
+    """Monitor all doctors and their current queue lengths"""
+    try:
+        db = request.app.state.db
+        doctors = None
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT a.start_time, d.name, u.email, d.contact 
+                FROM availability_schedules a 
+                JOIN doctors d ON a.doctor_id = d.id 
+                JOIN users u ON u.id = d.user_id 
+                WHERE a.is_active = false
+                AND a.day_of_week = EXTRACT(DOW FROM NOW());
+            """)
+            
+            doctors = cursor.fetchall()
+            
+        now = datetime.now()
+
+        for doctor in doctors:
+            if isinstance(doctor['start_time'], str):
+                try:
+                    doctor['start_time'] = datetime.strptime(doctor['start_time'], "%H:%M:%S").time()
+                except ValueError:
+                    doctor['start_time'] = datetime.strptime(doctor['start_time'], "%H:%M").time()
+            elif isinstance(doctor['start_time'], time):
+                start_dt = datetime.combine(now.date(), doctor['start_time'])
+            else:
+                raise ValueError(f"Unexpected start_time type: {type(doctor['start_time'])}")
+
+            diff = start_dt - now
+            success = False
+            # If within next 5 minutes (not past)
+            if timedelta(minutes=0) <= diff <= timedelta(minutes=5):
+                success=send_reminder_email(doctor['email'], doctor['name'], start_dt.strftime("%I:%M %p"))
+        return {
+            "success": success,
+        }
+
+    except Exception as e:
+        print("❌ ERROR in /monitor-doctors:")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 @router.post("/transfer-doctor")
 async def transfer_doctor(transfer: DoctorTransfer, request: Request):
-    """Transfer doctor to another clinic (3NF)"""
+    """Transfer doctor to another clinic"""
     try:
         db = request.app.state.db
         
@@ -430,7 +501,7 @@ async def transfer_doctor(transfer: DoctorTransfer, request: Request):
             
             # Get clinic name for notification
             cursor.execute("SELECT name FROM clinics WHERE id = %s", (transfer.new_clinic_id,))
-            clinic_name = cursor.fetchone()
+            clinic = cursor.fetchone()
             
             # Send notification to the doctor
             cursor.execute("""
@@ -447,7 +518,7 @@ async def transfer_doctor(transfer: DoctorTransfer, request: Request):
                     transfer.doctor_id,
                     'transfer_doctor',
                     'Transfer Successful',
-                    f"You have been transferred to clinic {clinic_name}"
+                    f"You have been transferred to clinic {clinic['name']}."
                 ))
             
             return {
@@ -484,50 +555,21 @@ async def post_bulletin(bulletin: BulletinCreate, request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.get("/notifications")
-async def get_notifications(request: Request):
-    """Get all unread admin notifications"""
+@router.delete("/delete-bulletin/{bulletin_id}")
+async def delete_bulletin(bulletin_id: int, request: Request):
+    """Delete a health bulletin/alert"""
     try:
         db = request.app.state.db
         
         with db.get_cursor() as cursor:
-            cursor.execute("""
-                SELECT id, type, clinic_id, clinic_name, message, created_at
-                FROM notifications
-                WHERE type = 'no_doctors_available' AND read = FALSE
-                ORDER BY created_at DESC
-            """)
-            
-            notifications = cursor.fetchall()
-            
-            return {
-                "success": True,
-                "count": len(notifications),
-                "notifications": notifications
-            }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-@router.put("/mark-notification-read/{notification_id}")
-async def mark_notification_read(notification_id: int, request: Request):
-    """Mark a notification as read"""
-    try:
-        db = request.app.state.db
-        
-        with db.get_cursor() as cursor:
-            cursor.execute("""
-                UPDATE notifications 
-                SET read = TRUE 
-                WHERE id = %s
-            """, (notification_id,))
+            cursor.execute("DELETE FROM bulletins WHERE id = %s", (bulletin_id,))
             
             if cursor.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Notification not found")
+                raise HTTPException(status_code=404, detail="Bulletin not found")
             
             return {
                 "success": True,
-                "message": "Notification marked as read"
+                "message": "Bulletin deleted successfully"
             }
     
     except HTTPException:

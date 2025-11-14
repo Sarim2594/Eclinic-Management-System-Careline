@@ -374,18 +374,10 @@ async def set_doctor_inactive(doctor_id: int, request: Request):
         db = request.app.state.db
         
         with db.get_cursor() as cursor:
-            # Verify doctor exists
-            cursor.execute("SELECT id FROM doctors WHERE id = %s", (doctor_id,))
-            doctor = cursor.fetchone()
-            
-            if not doctor:
-                raise HTTPException(status_code=404, detail="Doctor not found")
-            
-            # Update doctor status to inactive
             cursor.execute("""
                 UPDATE availability_schedules 
                 SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
-                WHERE doctor_id = %s
+                WHERE doctor_id = %s AND day_of_week %% 7 = EXTRACT(DOW FROM CURRENT_DATE)
             """, (doctor_id,))
             
             if cursor.rowcount == 0:

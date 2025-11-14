@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import hashlib
@@ -12,7 +13,7 @@ from dotenv import load_dotenv
 
 # Import database and routers
 from database import Database
-from reception import router as reception_router
+from receptionist import router as reception_router
 from doctor import router as doctor_router
 from admin import router as admin_router
 
@@ -46,7 +47,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CareLine",
-    description="E-Clinic Management System (3NF with PostgreSQL)",
+    description="E-Clinic Management System",
     version="3.0.0",
     lifespan=lifespan
 )
@@ -58,6 +59,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/templates", StaticFiles(directory="templates"), name="templates")
 
 # Initialize database
 db = Database()
@@ -135,8 +139,14 @@ def login_helper(credentials: LoginRequest):
                 cursor.execute("""
                     UPDATE availability_schedules
                     SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
-                    WHERE doctor_id = %s
-                """, (doctor['id'],))
+                    WHERE doctor_id = %s 
+                    AND day_of_week %% 7 = EXTRACT(DOW FROM CURRENT_DATE)
+                    AND (
+                        (start_time <= end_time AND CURRENT_TIME BETWEEN start_time AND end_time)
+                        OR
+                        (start_time > end_time AND (CURRENT_TIME >= start_time OR CURRENT_TIME <= end_time))
+                    );
+                    """, (doctor['id'],))
             
             elif user['role'] == 'receptionist':
                 cursor.execute("""
@@ -346,18 +356,6 @@ async def get_frontend():
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>Frontend not found. Please ensure templates/index.html exists.</h1>", 
-            status_code=404
-        )
-
-@app.get("/static/app.js")
-async def get_app_js():
-    """Serve the JavaScript file"""
-    try:
-        return FileResponse("static/app.js", media_type="application/javascript")
-    except FileNotFoundError:
-        return Response(
-            content="// JavaScript file not found", 
-            media_type="application/javascript", 
             status_code=404
         )
 
