@@ -37,7 +37,7 @@
 </head>
 <body class="bg-gray-50">
     <!-- Login Page -->
-    <div id="login-page" class="min-h-screen flex items-center justify-center px-4" style="background: linear-gradient(to bottom right, white, red);">
+    <div id="login-page" class="min-h-screen flex items-center justify-center px-4" style="background-image: url('/templates/Login_background.png'); background-size: cover; background-position: center; background-repeat: no-repeat;">
         <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in">
             <div class="text-center mb-8">
                 <img src="https://thecareline.org/wp-content/uploads/2025/10/CARELINE-1-HEARTBEAT-LOGO-01.png" alt="Careline Heartbeat Logo"/>
@@ -64,7 +64,7 @@
     <!-- Main Application (Hidden by default) -->
     <div id="main-app" class="hidden">
         <!-- Bulletin Board (Top of screen - PROMINENT) -->
-        <div id="bulletin-banner" class="bg-red-600 border-b-4 border-red-600">
+        <div id="bulletin-banner" class="border-b-4 border-red-600" style="background-image: url('/templates/Login_background.png'); background-size: cover; background-position: center; background-repeat: no-repeat;">
             <div class="container mx-auto px-6 py-4">
                 <div id="bulletin-content" class="space-y-3"> 
                     </div>
@@ -120,14 +120,14 @@
     </div>
 
     <!-- Custom PopUp Modal -->
-    <div id="notification-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div id="popup-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-down">
             <div class="text-center mb-6">
-                <div id="notif-icon" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div id="popup-icon" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                     <!-- Icon loaded dynamically -->
                 </div>
-                <h3 id="notif-title" class="text-2xl font-bold text-gray-800 mb-2"></h3>
-                <p id="notif-message" class="text-gray-600"></p>
+                <h3 id="popup-title" class="text-2xl font-bold text-gray-800 mb-2"></h3>
+                <p id="popup-message" class="text-gray-600"></p>
             </div>
             <button onclick="closePopUp()" class="w-full px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
                 Got it!

@@ -562,7 +562,7 @@ async def delete_bulletin(bulletin_id: int, request: Request):
         db = request.app.state.db
         
         with db.get_cursor() as cursor:
-            cursor.execute("DELETE FROM bulletins WHERE id = %s", (bulletin_id,))
+            cursor.execute("UPDATE bulletins SET active=FALSE WHERE id = %s", (bulletin_id,))
             
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Bulletin not found")

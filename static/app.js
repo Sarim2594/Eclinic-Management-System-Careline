@@ -70,6 +70,7 @@ async function handleLogin(event) {
             doctor.setCurrentUser(data);
             receptionist.setCurrentUser(data);
             notifications.setCurrentUser(data);
+            bulletins.setCurrentUser(data);
             const loginPage = document.getElementById('login-page');
             const mainApp = document.getElementById('main-app');
             if (loginPage) loginPage.classList.add('hidden');

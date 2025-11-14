@@ -1,10 +1,10 @@
 export function showPopUp(title, message, type) {
-    const modal = document.getElementById('notification-modal');
+    const modal = document.getElementById('popup-modal');
     if (!modal) return; // silently return if UI not present
 
-    const icon = document.getElementById('notif-icon');
-    const titleEl = document.getElementById('notif-title');
-    const messageEl = document.getElementById('notif-message');
+    const icon = document.getElementById('popup-icon');
+    const titleEl = document.getElementById('popup-title');
+    const messageEl = document.getElementById('popup-message');
 
     titleEl.textContent = title;
     messageEl.textContent = message;
@@ -26,7 +26,7 @@ export function showPopUp(title, message, type) {
 }
 
 export function closePopUp() {
-    const modal = document.getElementById('notification-modal');
+    const modal = document.getElementById('popup-modal');
     if (!modal) return;
     modal.classList.add('hidden');
 }
