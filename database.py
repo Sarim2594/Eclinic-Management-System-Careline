@@ -59,32 +59,64 @@ class Database:
                 DROP TABLE IF EXISTS appointments CASCADE;
                 DROP TABLE IF EXISTS availability_schedules CASCADE;
                 DROP TABLE IF EXISTS bulletins CASCADE;
+                DROP TABLE IF EXISTS admin_regions CASCADE;
                 DROP TABLE IF EXISTS doctors CASCADE;
-                DROP TABLE IF EXISTS admins CASCADE;
                 DROP TABLE IF EXISTS receptionists CASCADE;
+                DROP TABLE IF EXISTS admins CASCADE;
+                DROP TABLE IF EXISTS superadmins CASCADE;
                 DROP TABLE IF EXISTS patients CASCADE;
                 DROP TABLE IF EXISTS clinics CASCADE;
+                DROP TABLE IF EXISTS pakistan_regions CASCADE;
+                DROP TABLE IF EXISTS companies CASCADE;
                 DROP TABLE IF EXISTS users CASCADE;
             """)
             
-            # Users table (authentication only)
+            # Users table (authentication only) - updated with superadmin role
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
                     username VARCHAR(100) UNIQUE NOT NULL,
                     email VARCHAR(255) UNIQUE NOT NULL,
                     password VARCHAR(255) NOT NULL,
-                    role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'doctor', 'receptionist')),
+                    role VARCHAR(20) NOT NULL CHECK (role IN ('superadmin', 'admin', 'doctor', 'receptionist')),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Clinics table
+            # Companies table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS companies (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    contact VARCHAR(20) NOT NULL,
+                    registration_number VARCHAR(100) UNIQUE NOT NULL,
+                    address TEXT NOT NULL,
+                    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Pakistan regions table (for city-to-region mapping)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pakistan_regions (
+                    id SERIAL PRIMARY KEY,
+                    city VARCHAR(100) NOT NULL,
+                    sub_region VARCHAR(100) NOT NULL,
+                    province VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(city, province)
+                )
+            """)
+            
+            # Clinics table - updated with company_id and city
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS clinics (
                     id SERIAL PRIMARY KEY,
+                    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                     name VARCHAR(255) NOT NULL,
                     location VARCHAR(255) NOT NULL,
+                    city VARCHAR(100) NOT NULL,
                     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -105,6 +137,55 @@ class Database:
                     cnic VARCHAR(20) UNIQUE NOT NULL,
                     occupation VARCHAR(100),
                     nationality VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # SuperAdmins table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS superadmins (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    contact VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Admins table - updated with company_id
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admins (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    contact VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Admin regions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_regions (
+                    id SERIAL PRIMARY KEY,
+                    admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+                    region VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(admin_id, region)
+                )
+            """)
+            
+            # Admin change requests table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_change_requests (
+                    id SERIAL PRIMARY KEY,
+                    admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+                    request_type VARCHAR(50) NOT NULL CHECK (request_type IN ('password_reset', 'contact_change', 'regions_change')),
+                    requested_data TEXT NOT NULL,
+                    reason TEXT,
+                    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+                    rejection_reason TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -132,16 +213,6 @@ class Database:
                     license_number VARCHAR(50) UNIQUE NOT NULL,
                     contact VARCHAR(20) NOT NULL,
                     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS admins (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    name VARCHAR(255) NOT NULL,
-                    contact VARCHAR(20) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -184,6 +255,7 @@ class Database:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bulletins (
                     id SERIAL PRIMARY KEY,
+                    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                     title VARCHAR(255) NOT NULL,
                     message TEXT NOT NULL,
                     active BOOLEAN DEFAULT TRUE,
@@ -196,7 +268,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS notifications (
                     id SERIAL PRIMARY KEY,
                     type VARCHAR(50) NOT NULL,
-                    recipient_type VARCHAR(20) NOT NULL CHECK (recipient_type IN ('admin', 'doctor', 'receptionist')),
+                    recipient_type VARCHAR(20) NOT NULL CHECK (recipient_type IN ('superadmin', 'admin', 'doctor', 'receptionist')),
                     recipient_id INTEGER,
                     patient_id INTEGER REFERENCES patients(id) ON DELETE CASCADE,
                     doctor_id INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
@@ -208,7 +280,8 @@ class Database:
                     read BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     CONSTRAINT check_recipient CHECK (
-                        (recipient_type = 'admin' AND recipient_id IS NULL) OR
+                        (recipient_type = 'superadmin' AND recipient_id IS NULL) OR
+                        (recipient_type = 'admin' AND recipient_id IS NOT NULL) OR
                         (recipient_type = 'doctor' AND recipient_id IS NOT NULL) OR
                         (recipient_type = 'receptionist' AND recipient_id IS NOT NULL)
                     )
@@ -219,19 +292,48 @@ class Database:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
                 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+                CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+                
+                CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
+                CREATE INDEX IF NOT EXISTS idx_companies_email ON companies(email);
+                
+                CREATE INDEX IF NOT EXISTS idx_pakistan_regions_city ON pakistan_regions(city);
+                CREATE INDEX IF NOT EXISTS idx_pakistan_regions_province_subregion ON pakistan_regions(province, sub_region);
+                
+                CREATE INDEX IF NOT EXISTS idx_clinics_company_id ON clinics(company_id);
+                CREATE INDEX IF NOT EXISTS idx_clinics_city ON clinics(city);
+                
+                CREATE INDEX IF NOT EXISTS idx_superadmins_user_id ON superadmins(user_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id);
+                CREATE INDEX IF NOT EXISTS idx_admins_company_id ON admins(company_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_admin_regions_admin_id ON admin_regions(admin_id);
+                CREATE INDEX IF NOT EXISTS idx_admin_regions_region ON admin_regions(region);
+                
                 CREATE INDEX IF NOT EXISTS idx_doctors_user_id ON doctors(user_id);
                 CREATE INDEX IF NOT EXISTS idx_doctors_clinic_id ON doctors(clinic_id);
                 CREATE INDEX IF NOT EXISTS idx_doctors_license ON doctors(license_number);
+                CREATE INDEX IF NOT EXISTS idx_doctors_status ON doctors(status);
+                
                 CREATE INDEX IF NOT EXISTS idx_receptionists_user_id ON receptionists(user_id);
                 CREATE INDEX IF NOT EXISTS idx_receptionists_clinic_id ON receptionists(clinic_id);
+                
                 CREATE INDEX IF NOT EXISTS idx_patients_contact ON patients(contact);
+                CREATE INDEX IF NOT EXISTS idx_patients_cnic ON patients(cnic);
+                
                 CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments(patient_id);
                 CREATE INDEX IF NOT EXISTS idx_appointments_doctor_id ON appointments(doctor_id);
                 CREATE INDEX IF NOT EXISTS idx_appointments_clinic_id ON appointments(clinic_id);
                 CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status);
                 CREATE INDEX IF NOT EXISTS idx_appointments_created_at ON appointments(created_at);
+                
                 CREATE INDEX IF NOT EXISTS idx_availability_doctor_id ON availability_schedules(doctor_id);
                 CREATE INDEX IF NOT EXISTS idx_availability_day ON availability_schedules(day_of_week);
+                
+                CREATE INDEX IF NOT EXISTS idx_bulletins_company_id ON bulletins(company_id);
+                CREATE INDEX IF NOT EXISTS idx_bulletins_active ON bulletins(active);
+                
                 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_type, recipient_id);
                 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
                 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
@@ -244,39 +346,90 @@ class Database:
             # Clear existing data
             cursor.execute("""
                 TRUNCATE TABLE notifications, appointments, availability_schedules, 
-                       bulletins, doctors, receptionists, patients, clinics, users, admins
+                       bulletins, admin_regions, doctors, receptionists, admins, 
+                       superadmins, patients, clinics, pakistan_regions, companies, users
                 RESTART IDENTITY CASCADE
             """)
             
-            # ============= CLINICS =============
-            clinics_data = [
-                ("Shifa Medical Center", "F-7, Islamabad"),
-                ("Aga Khan Hospital", "Stadium Road, Karachi"),
-                ("Services Hospital", "Jail Road, Lahore")
+            # ============= PAKISTAN REGIONS MAPPING =============
+            pakistan_regions_data = {
+                "Punjab": {
+                    "Central Punjab": ["Lahore", "Faisalabad", "Kasur", "Okara", "Sheikhupura", "Nankana Sahib", "Chiniot", "Jhang", "Toba Tek Singh", "Kamoke", "Murīdke", "Raiwind", "Pattoki", "Depalpur", "Gojra", "Samundri", "Shorkot", "Shahkot", "Jaranwala"],
+                    "Potohar Region": ["Rawalpindi", "Islamabad", "Attock", "Taxila", "Wah Cantonment", "Chakwal", "Talagang", "Jhelum", "Dina", "Gujar Khan", "Murree", "Kotli Sattian", "Kahuta", "Kallar Syedan"],
+                    "Western Punjab": ["Sargodha", "Mianwali", "Khushab", "Bhakkar", "Kot Adu", "Jauharabad", "Kundian"],
+                    "Southern Punjab": ["Multan", "Bahawalpur", "Bahawalnagar", "DG Khan", "Muzaffargarh", "Layyah", "Rajanpur", "Rahim Yar Khan", "Sadiqabad", "Khanpur", "Lodhran", "Hasilpur"],
+                    "Eastern Punjab": ["Gujranwala", "Sialkot", "Gujrat", "Wazirabad", "Daska", "Narowal", "Hafizabad", "Phalia", "Mandi Bahauddin"]
+                },
+                "Sindh": {
+                    "Upper Sindh": ["Sukkur", "Larkana", "Khairpur", "Shikarpur", "Jacobabad", "Ghotki", "Kashmore", "Kandhkot", "Rohri"],
+                    "Lower Sindh": ["Karachi", "Hyderabad", "Thatta", "Mirpur Sakro", "Badin", "Sujawal", "Kotri", "Tando Muhammad Khan", "Tando Allahyar"],
+                    "Central Sindh": ["Nawabshah", "Sanghar", "Dadu", "Jamshoro", "Matiari", "Shahdadpur", "Sehwan"],
+                    "Thar Region": ["Mithi", "Tharparkar", "Umerkot", "Mirpur Khas", "Diplo", "Chachro", "Nagarparkar"]
+                },
+                "Khyber Pakhtunkhwa": {
+                    "Northern KP": ["Abbottabad", "Mansehra", "Balakot", "Battagram", "Besham", "Alpuri", "Swat", "Mingora", "Kalam", "Malakand", "Dir", "Chitral", "Drosh"],
+                    "Central KP": ["Peshawar", "Mardan", "Charsadda", "Nowshera", "Swabi", "Takht-i-Bahi"],
+                    "Southern KP": ["Kohat", "Hangu", "Karak", "Bannu", "Lakki Marwat", "Tank", "Dera Ismail Khan"],
+                    "Ex-FATA Areas": ["Khyber", "Bara", "Parachinar", "Sadda", "Miramshah", "Miran Shah", "Wana", "Ghalanai", "Khar"]
+                },
+                "Balochistan": {
+                    "Central Balochistan": ["Quetta", "Pishin", "Chaman", "Ziarat", "Mastung", "Killa Abdullah", "Huramzai"],
+                    "Northern Balochistan": ["Zhob", "Loralai", "Killa Saifullah", "Musakhel", "Barkhan", "Sherani"],
+                    "Eastern Balochistan": ["Sibi", "Dera Bugti", "Kohlu", "Dhadar", "Jaffarabad", "Sohbatpur"],
+                    "Western Balochistan": ["Chagai", "Nushki", "Dalbandin", "Kharan", "Washuk"],
+                    "Makran Region": ["Gwadar", "Turbat", "Kech", "Panjgur", "Awaran", "Lasbela", "Hub", "Ormara", "Pasni"]
+                }
+            }
+            
+            # Populate pakistan_regions table
+            regions_insert_data = []
+            for province, sub_regions in pakistan_regions_data.items():
+                for sub_region, cities in sub_regions.items():
+                    for city in cities:
+                        regions_insert_data.append((city, sub_region, province))
+            
+            cursor.executemany("""
+                INSERT INTO pakistan_regions (city, sub_region, province) 
+                VALUES (%s, %s, %s)
+            """, regions_insert_data)
+            
+            print(f"✓ Inserted {len(regions_insert_data)} city-to-region mappings")
+            
+            # ============= COMPANIES =============
+            companies_data = [
+                ("Edhi Foundation", "info@edhi.pk", "+923001111000", "REG-EDH-2024-001", "Blue Area, Islamabad, Pakistan", "active"),
+                ("Sehat Medical Group", "contact@sehat.pk", "+923002222000", "REG-SMG-2024-002", "Clifton Block 5, Karachi, Pakistan", "active"),
+                ("E-Shifa Wellness Services", "admin@eshifa.pk", "+923003333000", "REG-SWS-2024-003", "Model Town, Lahore, Pakistan", "inactive")
             ]
             
             cursor.executemany("""
-                INSERT INTO clinics (name, location) VALUES (%s, %s)
-            """, clinics_data)
+                INSERT INTO companies (name, email, contact, registration_number, address, status) 
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, companies_data)
+            
+            print(f"✓ Inserted {len(companies_data)} companies")
             
             # ============= USERS =============
+            superadmin_pass = hashlib.sha256("super123".encode()).hexdigest()
             admin_pass = hashlib.sha256("admin123".encode()).hexdigest()
             doc_pass = hashlib.sha256("doc123".encode()).hexdigest()
             recep_pass = hashlib.sha256("recep123".encode()).hexdigest()
             
             users_data = [
-                # Admin
-                ('muhammad.yasir', 'muhammad.yasir@careline.org', admin_pass, 'admin'),
-                ('junaid.ahmed', 'junaid.ahmed@careline.org', admin_pass, 'admin'),
-                ('sarim.khan', 'sarim.khan@careline.org', admin_pass, 'admin'),
+                # SuperAdmin
+                ('muhammad.yasir', 'muhammad.yasir@edhi.pk', superadmin_pass, 'superadmin'),
+                # Admins
+                ('areeb.rehman', 'areeb.rehman@edhi.pk', admin_pass, 'admin'),
+                ('junaid.ahmed', 'junaid.ahmed@sehat.pk', admin_pass, 'admin'),
+                ('sarim.khan', 'sarim.khan@edhi.pk', admin_pass, 'admin'),
                 # Doctors
-                ('ahmed.ali', 'ahmed.ali@careline.org', doc_pass, 'doctor'),
-                ('fatima.hassan', 'fatima.hassan@careline.org', doc_pass, 'doctor'),
-                ('sara.khan', 'sara.khan@careline.org', doc_pass, 'doctor'),
+                ('ahmed.ali', 'ahmed.ali@edhi.pk', doc_pass, 'doctor'),
+                ('fatima.hassan', 'fatima.hassan@edhi.pk', doc_pass, 'doctor'),
+                ('sara.khan', 'sara.khan@sehat.pk', doc_pass, 'doctor'),
                 # Receptionists
-                ('syed.ammar', 'syed.ammar@careline.org', recep_pass, 'receptionist'),
-                ('zainab.malik', 'zainab.malik@careline.org', recep_pass, 'receptionist'),
-                ('hina.tariq', 'hina.tariq@careline.org', recep_pass, 'receptionist')
+                ('syed.ammar', 'syed.ammar@edhi.pk', recep_pass, 'receptionist'),
+                ('zainab.malik', 'zainab.malik@sehat.pk', recep_pass, 'receptionist'),
+                ('hina.tariq', 'hina.tariq@edhi.pk', recep_pass, 'receptionist')
             ]
             
             cursor.executemany("""
@@ -284,23 +437,68 @@ class Database:
                 VALUES (%s, %s, %s, %s)
             """, users_data)
             
-            # ============= ADMINS =============
-            admins_data = [
-                (1, 'Muhammad Yasir', '+923001234547'),
-                (2, 'Junaid Ahmed', '+923002645678'),
-                (3, 'Sarim Khan', '+923003476789')
+            print(f"✓ Inserted {len(users_data)} users")
+            
+            # ============= SUPERADMIN =============
+            superadmin_data = [(1, 'Muhammad Yasir', '+923009999999')]
+            
+            cursor.executemany("""
+                INSERT INTO superadmins (user_id, name, contact) 
+                VALUES (%s, %s, %s)
+            """, superadmin_data)
+            
+            print(f"✓ Inserted {len(superadmin_data)} superadmin")
+            
+            # ============= CLINICS (with company_id and city) =============
+            clinics_data = [
+                (1, "Shifa Medical Center", "F-7, Islamabad", "Islamabad"),
+                (2, "Aga Khan Hospital", "Stadium Road, Karachi", "Karachi"),
+                (1, "Services Hospital", "Jail Road, Lahore", "Lahore")
             ]
             
             cursor.executemany("""
-                INSERT INTO admins (user_id, name, contact) 
-                VALUES (%s, %s, %s)
+                INSERT INTO clinics (company_id, name, location, city) 
+                VALUES (%s, %s, %s, %s)
+            """, clinics_data)
+            
+            print(f"✓ Inserted {len(clinics_data)} clinics")
+            
+            # ============= ADMINS (with company_id) =============
+            admins_data = [
+                (2, 1, 'Areeb Rehman', '+923001234547'),   # Company 1
+                (3, 2, 'Junaid Ahmed', '+923002645678'),     # Company 2
+                (4, 1, 'Sarim Khan', '+923003476789')        # Company 1 (multiple admins for same company)
+            ]
+            
+            cursor.executemany("""
+                INSERT INTO admins (user_id, company_id, name, contact) 
+                VALUES (%s, %s, %s, %s)
             """, admins_data)
+            
+            print(f"✓ Inserted {len(admins_data)} admins")
+            
+            # ============= ADMIN REGIONS =============
+            admin_regions_data = [
+                (1, 'Punjab|Central Punjab'),
+                (1, 'Punjab|Potohar Region'),
+                (2, 'Sindh|Lower Sindh'),
+                (2, 'Sindh|Upper Sindh'),
+                (3, 'Khyber Pakhtunkhwa|Central KP'),
+                (3, 'Khyber Pakhtunkhwa|Northern KP')
+            ]
+            
+            cursor.executemany("""
+                INSERT INTO admin_regions (admin_id, region) 
+                VALUES (%s, %s)
+            """, admin_regions_data)
+            
+            print(f"✓ Inserted {len(admin_regions_data)} admin region assignments")
             
             # ============= DOCTORS =============
             doctors_data = [
-                (4, 1, 'Ahmed Ali', 'PMC-12345', '+923001234567'),
-                (5, 1, 'Fatima Hassan', 'PMC-12346', '+923002345678'),
-                (6, 2, 'Sara Khan', 'PMC-12347', '+923003456789')
+                (5, 1, 'Ahmed Ali', 'PMC-12345', '+923001234567'),
+                (6, 1, 'Fatima Hassan', 'PMC-12346', '+923002345678'),
+                (7, 2, 'Sara Khan', 'PMC-12347', '+923003456789')
             ]
             
             cursor.executemany("""
@@ -308,11 +506,13 @@ class Database:
                 VALUES (%s, %s, %s, %s, %s)
             """, doctors_data)
             
+            print(f"✓ Inserted {len(doctors_data)} doctors")
+            
             # ============= RECEPTIONISTS =============
             receptionists_data = [
-                (7, 1, 'Syed Ammar', '+923001111111'),
-                (8, 2, 'Zainab Malik', '+923002222222'),
-                (9, 3, 'Hina Tariq', '+923003333333')
+                (8, 1, 'Syed Ammar', '+923001111111'),
+                (9, 2, 'Zainab Malik', '+923002222222'),
+                (10, 3, 'Hina Tariq', '+923003333333')
             ]
             
             cursor.executemany("""
@@ -320,18 +520,21 @@ class Database:
                 VALUES (%s, %s, %s, %s)
             """, receptionists_data)
             
+            print(f"✓ Inserted {len(receptionists_data)} receptionists")
+            
             # ============= AVAILABILITY SCHEDULES =============
             availability_data = []
             
-            for day in range(1, 6):
+            # Doctor 1: Mon-Sun 9AM-5PM
+            for day in range(1, 8):
                 availability_data.append((1, day, '09:00', '17:00'))
-            availability_data.append((1, 6, None, None))
-            availability_data.append((1, 7, None, None))
             
+            # Doctor 2: Mon-Sat 5PM-5AM (night shift), Sun 5PM-3AM
             for day in range(1, 7):
-                availability_data.append((2, day, '17:00', '5:00'))
-            availability_data.append((2, 7, '17:00', '3:00'))
+                availability_data.append((2, day, '17:00', '05:00'))
+            availability_data.append((2, 7, '17:00', '03:00'))
             
+            # Doctor 3: Tue-Sun 1:45PM-8PM (off on Monday)
             for day in range(2, 8):
                 availability_data.append((3, day, '13:45', '20:00'))
             availability_data.append((3, 1, None, None))
@@ -341,14 +544,19 @@ class Database:
                 VALUES (%s, %s, %s, %s)
             """, availability_data)
             
-            # ============= SAMPLE BULLETIN =============
+            print(f"✓ Inserted {len(availability_data)} availability schedules")
+            
+            # ============= SAMPLE BULLETINS (one per company) =============
             cursor.execute("""
-                INSERT INTO bulletins (title, message) 
-                VALUES (%s, %s)
-            """, (
-                'Dengue Fever Alert',
-                '⚠️ Increased dengue cases in urban areas. Use mosquito repellent and eliminate standing water.'
-            ))
+                INSERT INTO bulletins (company_id, title, message) 
+                VALUES 
+                    (1, 'Dengue Fever Alert', '⚠️ Increased dengue cases in urban areas. Use mosquito repellent and eliminate standing water.'),
+                    (2, 'New COVID-19 Guidelines', '📋 Updated protocols for patient screening. All staff must follow new safety measures.'),
+                    (1, 'Staff Training Session', '📚 Mandatory training on new equipment next Monday at 9 AM. Attendance is required.')
+            """)
+            
+            print("✓ Inserted sample bulletins")
+            print("\n✅ Test data initialization complete!")
     
     def close(self):
         """Close all database connections"""

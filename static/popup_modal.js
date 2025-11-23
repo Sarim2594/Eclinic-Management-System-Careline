@@ -1,6 +1,6 @@
 export function showPopUp(title, message, type) {
     const modal = document.getElementById('popup-modal');
-    if (!modal) return; // silently return if UI not present
+    if (!modal) return; 
 
     const icon = document.getElementById('popup-icon');
     const titleEl = document.getElementById('popup-title');

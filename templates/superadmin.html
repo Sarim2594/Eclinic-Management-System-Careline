@@ -1,0 +1,324 @@
+<div id="superadmin-notifications" class="mb-6"></div>
+
+<div class="flex gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
+    <button onclick="showSuperAdminTab('dashboard')" id="superadmin-tab-dashboard" class="px-4 py-3 font-medium border-b-2 border-primary text-primary whitespace-nowrap">
+        <i class="fas fa-chart-line mr-2"></i>Dashboard
+    </button>
+    <button onclick="showSuperAdminTab('companies')" id="superadmin-tab-companies" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">
+        <i class="fas fa-building mr-2"></i>Companies
+    </button>
+    <button onclick="showSuperAdminTab('register-company')" id="superadmin-tab-register-company" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">
+        <i class="fas fa-plus-circle mr-2"></i>Register Company
+    </button>
+    <button onclick="showSuperAdminTab('admins')" id="superadmin-tab-admins" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">
+        <i class="fas fa-user-shield mr-2"></i>Admins
+    </button>
+    <button onclick="showSuperAdminTab('create-admin')" id="superadmin-tab-create-admin" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">
+        <i class="fas fa-user-plus mr-2"></i>Create Admin
+    </button>
+    <button onclick="showSuperAdminTab('analytics')" id="superadmin-tab-analytics" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">
+        <i class="fas fa-chart-pie mr-2"></i>Analytics
+    </button>
+</div>
+
+<div id="superadmin-message" class="hidden mb-6 p-4 rounded-lg"></div>
+
+<!-- Dashboard Tab -->
+<div id="superadmin-dashboard-tab">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white transform hover:-translate-y-1 transition-transform">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-blue-100 text-sm mb-1">Total Companies</p>
+                    <p id="superadmin-stat-companies" class="text-4xl font-bold">-</p>
+                </div>
+                <div class="bg-white bg-opacity-20 p-4 rounded-lg">
+                    <i class="fas fa-building text-3xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-6 text-white transform hover:-translate-y-1 transition-transform">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-green-100 text-sm mb-1">Total Admins</p>
+                    <p id="superadmin-stat-admins" class="text-4xl font-bold">-</p>
+                </div>
+                <div class="bg-white bg-opacity-20 p-4 rounded-lg">
+                    <i class="fas fa-user-shield text-3xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-6 text-white transform hover:-translate-y-1 transition-transform">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-purple-100 text-sm mb-1">Total Clinics</p>
+                    <p id="superadmin-stat-clinics" class="text-4xl font-bold">-</p>
+                </div>
+                <div class="bg-white bg-opacity-20 p-4 rounded-lg">
+                    <i class="fas fa-hospital text-3xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-6 text-white transform hover:-translate-y-1 transition-transform">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-orange-100 text-sm mb-1">Total Doctors</p>
+                    <p id="superadmin-stat-doctors" class="text-4xl font-bold">-</p>
+                </div>
+                <div class="bg-white bg-opacity-20 p-4 rounded-lg">
+                    <i class="fas fa-user-md text-3xl"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold text-gray-800">
+                <i class="fas fa-chart-bar text-primary mr-2"></i>Company Breakdown
+            </h3>
+            <input type="text" id="company-search" oninput="searchCompanies()" placeholder="Search companies..." class="px-4 py-2 border border-gray-300 rounded-lg">
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b-2 border-gray-200 bg-gray-50">
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Company Name</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Admins</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Clinics</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Doctors</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Patients</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="superadmin-company-breakdown"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Companies Tab -->
+<div id="superadmin-companies-tab" class="hidden">
+    <div class="bg-white rounded-xl shadow-lg p-6">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-xl font-bold text-gray-800">
+                <i class="fas fa-building text-primary mr-2"></i>All Registered Companies
+            </h3>
+            <input type="text" id="all-companies-search" oninput="searchAllCompanies()" placeholder="Search companies..." class="px-4 py-2 border border-gray-300 rounded-lg">
+        </div>
+        <div id="companies-list" class="space-y-4">
+            <p class="text-gray-500 text-center py-8">Loading companies...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Register Company Tab -->
+<div id="superadmin-register-company-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+    <h3 class="text-xl font-bold text-gray-800 mb-6">
+        <i class="fas fa-plus-circle text-primary mr-2"></i>Register New Company
+    </h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
+            <input type="text" id="company-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Healthcare Solutions Ltd.">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Company Email *</label>
+            <input type="email" id="company-email" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="info@company.com">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Contact Number *</label>
+            <input type="text" id="company-contact" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="+92 300-1234567">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Registration Number *</label>
+            <input type="text" id="company-reg-number" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="REG-12345">
+        </div>
+        <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+            <textarea id="company-address" rows="3" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter company address"></textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Subscription Plan *</label>
+            <select id="company-subscription" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                <option value="basic">Basic</option>
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+                <option value="enterprise">Enterprise</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Max Clinics Allowed *</label>
+            <input type="number" id="company-max-clinics" min="1" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="10">
+        </div>
+    </div>
+    <button onclick="registerCompany()" class="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
+        <i class="fas fa-check mr-2"></i>Register Company
+    </button>
+</div>
+
+<!-- Admins Tab -->
+<div id="superadmin-admins-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h3 class="text-xl font-bold text-gray-800">
+            <i class="fas fa-user-shield text-primary mr-2"></i>All Admins
+        </h3>
+        <div class="flex gap-3">
+            <input type="text" id="admin-search" oninput="searchAdmins()" placeholder="Search admins..." class="px-4 py-2 border border-gray-300 rounded-lg">
+            <select id="admin-filter-company" onchange="filterAdminsByCompany()" class="px-4 py-2 border border-gray-300 rounded-lg">
+                <option value="">All Companies</option>
+            </select>
+        </div>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b-2 border-gray-200 bg-gray-50">
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Name</th>
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Username</th>
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Email</th>
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Company</th>
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Assigned Regions</th>
+                    <th class="text-left py-3 px-4 font-semibold text-gray-700">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="admins-list"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Create Admin Tab -->
+<div id="superadmin-create-admin-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+    <h3 class="text-xl font-bold text-gray-800 mb-6">
+        <i class="fas fa-user-plus text-primary mr-2"></i>Create New Admin
+    </h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+            <input type="text" id="admin-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Ali Ahmed">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Username *</label>
+            <input type="text" id="admin-username" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ali.ahmed">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+            <input type="email" id="admin-email" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ali@company.com">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Password *</label>
+            <input type="password" id="admin-password" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter password">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Contact *</label>
+            <input type="text" id="admin-contact" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="+92 300-1234567">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Assign to Company *</label>
+            <select id="admin-company" onchange="loadRegionsForCompany()" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                <option value="">Select company...</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Region Selection -->
+    <div class="mb-6">
+        <div class="flex justify-between items-center mb-3">
+            <label class="block text-sm font-medium text-gray-700">Assign Regions (Province > Sub-Region) *</label>
+            <button onclick="assignAllRegions()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors">
+                <i class="fas fa-check-double mr-2"></i>Assign All Regions
+            </button>
+        </div>
+        <div id="regions-container" class="border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto bg-gray-50">
+            <p class="text-gray-500 text-center">Select a company to view available regions</p>
+        </div>
+        <p class="text-sm text-gray-600 mt-2">
+            <i class="fas fa-info-circle mr-1"></i>Selected regions: <span id="selected-count" class="font-semibold text-primary">0</span>
+        </p>
+    </div>
+
+    <button onclick="createAdmin()" class="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
+        <i class="fas fa-user-plus mr-2"></i>Create Admin
+    </button>
+</div>
+
+<!-- Analytics Tab -->
+<div id="superadmin-analytics-tab" class="hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-chart-pie text-primary mr-2"></i>Regional Distribution
+            </h3>
+            <div id="regional-chart" class="h-64 flex items-center justify-center text-gray-500">
+                Analytics data loading...
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-chart-line text-primary mr-2"></i>Growth Trends
+            </h3>
+            <div id="growth-chart" class="h-64 flex items-center justify-center text-gray-500">
+                Analytics data loading...
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-lg p-6">
+        <h3 class="text-lg font-bold text-gray-800 mb-4">
+            <i class="fas fa-crown text-primary mr-2"></i>Top Performing Companies
+        </h3>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b-2 border-gray-200 bg-gray-50">
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Rank</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Company</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Total Clinics</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Total Doctors</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Total Patients</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-700">Performance Score</th>
+                    </tr>
+                </thead>
+                <tbody id="top-companies"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Admin Modal -->
+<div id="edit-admin-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b p-6 flex justify-between items-center z-10">
+            <h3 class="text-2xl font-bold text-gray-800">
+                <i class="fas fa-edit text-primary mr-2"></i>Edit Admin Regions
+            </h3>
+            <button onclick="closeEditAdminModal()" class="text-gray-500 hover:text-gray-800 transition-colors">
+                <i class="fas fa-times text-2xl"></i>
+            </button>
+        </div>
+        <div class="p-6">
+            <input type="hidden" id="edit-admin-id">
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg">
+                <p class="text-gray-700"><strong>Admin:</strong> <span id="edit-admin-info" class="text-primary"></span></p>
+            </div>
+            <div class="flex justify-between items-center mb-3">
+                <label class="block text-sm font-medium text-gray-700">Assigned Regions</label>
+                <button onclick="assignAllRegionsEdit()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors">
+                    <i class="fas fa-check-double mr-2"></i>Assign All Regions
+                </button>
+            </div>
+            <div id="edit-regions-container" class="border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto mb-4 bg-gray-50"></div>
+            <p class="text-sm text-gray-600 mb-4">
+                <i class="fas fa-info-circle mr-1"></i>Selected regions: <span id="edit-selected-count" class="font-semibold text-primary">0</span>
+            </p>
+            <button onclick="updateAdminRegions()" class="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
+                <i class="fas fa-save mr-2"></i>Update Regions
+            </button>
+        </div>
+    </div>
+</div>

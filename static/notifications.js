@@ -1,13 +1,9 @@
+import { getUser } from "./user_state.js";
+
 const sound = new Audio("https://assets.mixkit.co/active_storage/sfx/2870/2870-preview.mp3");
 
 let lastNotificationCount = 0;
 let notificationInterval = null;
-
-let currentUser = null;
-
-export function setCurrentUser(data) {
-    currentUser = data;
-}
 
 export function toggleNotifications() {
     const dropdown = document.getElementById('notification-dropdown');
@@ -22,6 +18,7 @@ export function toggleNotifications() {
 }
 
 async function getNotifications() {
+    const currentUser = getUser();
     if (!currentUser) return;
     
     const role = currentUser.role;
@@ -31,18 +28,20 @@ async function getNotifications() {
         userId = currentUser.doctor_id;
     } else if (role === 'receptionist') {
         userId = currentUser.receptionist_id;
+    } else if (role === 'admin') {
+        userId = currentUser.admin_id;
+    } else if (role === 'superadmin') {
+        userId = currentUser.superadmin_id;
     }
     
     try {
-        const url = userId 
-            ? `http://localhost:8000/api/notifications/${role}/${userId}`
-            : `http://localhost:8000/api/notifications/${role}/0`;
+        // FIX: Use the new /notifications/{role}?user_id={id} structure
+        const url = `http://localhost:8000/api/notifications/${role}` + (userId ? `?user_id=${userId}` : '');
             
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.success) {
-            // Check if there are new notifications
             if (data.count > lastNotificationCount) {
                 playNotificationSound();
             }
@@ -58,7 +57,6 @@ async function getNotifications() {
 
 function playNotificationSound() {
     if (sound) {
-        // Reset and play
         sound.currentTime = 0;
         sound.play();
     }
@@ -150,7 +148,6 @@ export async function markNotificationRead(notificationId) {
         const data = await response.json();
         
         if (data.success) {
-            // Reload notifications to update the list and badge
             await getNotifications();
         }
     } catch (error) {
@@ -159,10 +156,9 @@ export async function markNotificationRead(notificationId) {
 }
 
 export async function markAllAsRead() {
+    const currentUser = getUser();
     if (!currentUser) return;
     
-    console.log(currentUser);
-
     const role = currentUser.role;
     let userId = null;
     
@@ -170,18 +166,21 @@ export async function markAllAsRead() {
         userId = currentUser.doctor_id;
     } else if (role === 'receptionist') {
         userId = currentUser.receptionist_id;
+    } else if (role === 'admin') {
+        userId = currentUser.admin_id;
+    } else if (role === 'superadmin') {
+        userId = currentUser.superadmin_id;
     }
     
     try {
-        const url = userId 
-            ? `http://localhost:8000/api/notifications/mark-all-read/${role}/${userId}`
-            : `http://localhost:8000/api/notifications/mark-all-read/${role}/0`;
+        // FIX: Use the new /mark-all-read/{role}?user_id={id} structure
+        const url = `http://localhost:8000/api/notifications/mark-all-read/${role}` + (userId ? `?user_id=${userId}` : '');
             
         const response = await fetch(url, { method: 'PUT' });
         const data = await response.json();
         
         if (data.success) {
-            lastNotificationCount = 0; // Reset count to avoid sound on next refresh
+            lastNotificationCount = 0; 
             await getNotifications();
         }
     } catch (error) {
@@ -192,10 +191,8 @@ export async function markAllAsRead() {
 export function setupNotificationCloser() {
     document.addEventListener('click', function(event) {
         const dropdown = document.getElementById('notification-dropdown');
-        // Use a more robust selector for the button
         const bell = event.target.closest('#notification-button');
         
-        // Logic: If the click is not inside the dropdown AND not on the bell button
         if (dropdown && !dropdown.contains(event.target) && !bell) {
             dropdown.classList.add('hidden');
         }

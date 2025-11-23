@@ -1,5 +1,97 @@
+import * as popup from '../popup_modal.js';
+import * as validate from '../validation_functions.js';
+import { getUser } from '../user_state.js';
+
+let allReceptionists = [];
+let allDoctors = [];
+
+// Request change functions
+window.requestPasswordChange = async function() {
+    const newPassword = document.getElementById('request-new-password').value.trim();
+    const reason = document.getElementById('request-password-reason').value.trim();
+
+    if (!newPassword || !reason) {
+        popup.showPopUp('Missing Fields', 'Please provide both new password and reason', 'error');
+        return;
+    }
+
+    const adminData = getUser();
+    if (!adminData || !adminData.admin_id) {
+        popup.showPopUp('Error', 'Admin information not found', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('http://localhost:8000/api/admin/request-password-change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                admin_id: adminData.admin_id,
+                new_password: newPassword,
+                reason: reason
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            popup.showPopUp('Request Submitted', 'Your password change request has been sent to SuperAdmin', 'success');
+            document.getElementById('request-new-password').value = '';
+            document.getElementById('request-password-reason').value = '';
+        } else {
+            popup.showPopUp('Request Failed', data.detail || 'Failed to submit request', 'error');
+        }
+    } catch (error) {
+        popup.showPopUp('Error', 'Failed to submit request: ' + error.message, 'error');
+    }
+}
+
+window.requestContactChange = async function() {
+    const newContact = document.getElementById('request-new-contact').value.trim();
+    const reason = document.getElementById('request-contact-reason').value.trim();
+
+    if (!newContact || newContact === '+92 ' || !reason) {
+        popup.showPopUp('Missing Fields', 'Please provide both new contact and reason', 'error');
+        return;
+    }
+
+    const adminData = getUser();
+    if (!adminData || !adminData.admin_id) {
+        popup.showPopUp('Error', 'Admin information not found', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('http://localhost:8000/api/admin/request-contact-change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                admin_id: adminData.admin_id,
+                new_contact: newContact,
+                reason: reason
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            popup.showPopUp('Request Submitted', 'Your contact change request has been sent to SuperAdmin', 'success');
+            document.getElementById('request-new-contact').value = '+92 ';
+            document.getElementById('request-contact-reason').value = '';
+        } else {
+            popup.showPopUp('Request Failed', data.detail || 'Failed to submit request', 'error');
+        }
+    } catch (error) {
+        popup.showPopUp('Error', 'Failed to submit request: ' + error.message, 'error');
+    }
+}
+
+window.openRegionsChangeRequest = function() {
+    popup.showPopUp('Feature Coming Soon', 'Region change requests will be available in a future update', 'info');
+}
+
 export function showAdminTab(tab) {
-    ['dashboard', 'staff', 'clinic', 'receptionist', 'doctor', 'available-doctors', 'transfer', 'bulletin'].forEach(t => {
+    ['dashboard', 'staff', 'clinic', 'receptionist', 'doctor', 'available-doctors', 'transfer', 'bulletin', 'change-requests'].forEach(t => {
         const btn = document.getElementById(`admin-tab-${t}`);
         if (btn) {
             btn.className = `px-4 py-3 font-medium border-b-2 ${t === tab ? 'border-primary text-primary' : 'border-transparent text-gray-600'} whitespace-nowrap`;
@@ -20,6 +112,7 @@ export function showAdminTab(tab) {
     document.getElementById('admin-available-doctors-tab').classList.toggle('hidden', tab !== 'available-doctors');
     document.getElementById('admin-transfer-tab').classList.toggle('hidden', tab !== 'transfer');
     document.getElementById('admin-bulletin-tab').classList.toggle('hidden', tab !== 'bulletin');
+    document.getElementById('admin-change-requests-tab').classList.toggle('hidden', tab !== 'change-requests');
 
     if (['receptionist', 'doctor', 'transfer'].includes(tab)) {
         loadAdminClinicsDropdown().catch(() => {});
@@ -66,9 +159,6 @@ export async function loadAdminDashboard() {
         console.error('Error loading admin dashboard:', error);
     }
 }
-
-let allReceptionists = [];
-let allDoctors = [];
 
 export async function loadStaffAssignments() {
     try {
@@ -117,8 +207,7 @@ function displayStaff(receptionists, doctors) {
 }
 
 export function searchStaff() {
-    const qEl = document.getElementById('staff-search');
-    const query = qEl ? qEl.value.toLowerCase() : '';
+    const query = document.getElementById('staff-search').value.toLowerCase();
 
     const filteredReceptionists = allReceptionists.filter(r => (
         (r.name || '').toLowerCase().includes(query) ||
@@ -152,9 +241,7 @@ export async function searchAvailableDoctors() {
 
 async function monitorDoctors() {
     try {
-        const response = await fetch(`http://localhost:8000/api/admin/monitor-doctors`);
-        const data = await response.json();
-        if (data.success) {return;}
+        await fetch(`http://localhost:8000/api/admin/monitor-doctors`);
     } catch (error) {
         console.error('Error monitoring unavailable doctors:', error);
     }
@@ -169,7 +256,7 @@ export function startAvailableDoctorsPolling() {
     AvailableDoctorsInterval = setInterval(() => {
         searchAvailableDoctors();
         monitorDoctors();
-    }, 300000);
+    }, 60000);
 }
 
 export function stopAvailableDoctorsPolling() {

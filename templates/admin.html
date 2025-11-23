@@ -9,6 +9,7 @@
     <button onclick="showAdminTab('available-doctors')" id="admin-tab-available-doctors" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">View Available Doctors</button>            
     <button onclick="showAdminTab('transfer')" id="admin-tab-transfer" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Transfer Doctor</button>
     <button onclick="showAdminTab('bulletin')" id="admin-tab-bulletin" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Post Bulletin</button>
+    <button onclick="showAdminTab('change-requests')" id="admin-tab-change-requests" class="px-4 py-3 font-medium border-b-2 border-transparent text-gray-600 whitespace-nowrap">Request Changes</button>
 </div>
 
 <div id="admin-message" class="hidden mb-6 p-4 rounded-lg"></div>
@@ -258,8 +259,17 @@
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">Day *</label>
-                <input type="number" id="edit-doctor-day" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter day (1=Monday, 7=Sunday)" min="0" max="6" step="1">
-            </div>
+                    <select id="edit-doctor-day" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="">Select day...</option>
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                        <option value="7">Sunday</option>
+                    </select>
+                </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">New Start Time *</label>
                 <input type="time" id="edit-doctor-start-time" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
@@ -327,4 +337,54 @@
         </div>
     </div>
     <button onclick="postBulletin()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors">Post Bulletin</button>
+</div>
+
+<!-- Request Changes Tab -->
+<div id="admin-change-requests-tab" class="hidden bg-white rounded-xl shadow-lg p-6">
+    <h3 class="text-xl font-bold text-gray-800 mb-6">Request Changes from SuperAdmin</h3>
+    
+    <!-- Password Reset Request -->
+    <div class="bg-white rounded-lg border p-4 mb-6">
+        <h4 class="font-bold text-gray-800 mb-4">Request Password Reset</h4>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">New Password *</label>
+                <input type="password" id="request-new-password" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter new password">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Reason for Change *</label>
+                <textarea id="request-password-reason" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Why do you need to change your password?"></textarea>
+            </div>
+            <button onclick="requestPasswordChange()" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+                Submit Password Reset Request
+            </button>
+        </div>
+    </div>
+
+    <!-- Contact Change Request -->
+    <div class="bg-white rounded-lg border p-4 mb-6">
+        <h4 class="font-bold text-gray-800 mb-4">Request Contact Number Change</h4>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">New Contact Number *</label>
+                <input type="text" id="request-new-contact" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="+92 300-1234567" value="+92 " oninput="formatPhoneInput(this)">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Reason for Change *</label>
+                <textarea id="request-contact-reason" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Why do you need to change your contact?"></textarea>
+            </div>
+            <button onclick="requestContactChange()" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
+                Submit Contact Change Request
+            </button>
+        </div>
+    </div>
+
+    <!-- Regions Change Request -->
+    <div class="bg-white rounded-lg border p-4">
+        <h4 class="font-bold text-gray-800 mb-4">Request Regions Change</h4>
+        <p class="text-sm text-gray-600 mb-4">Note: This feature allows you to request changes to your assigned regions. The SuperAdmin will review and approve your request.</p>
+        <button onclick="openRegionsChangeRequest()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors">
+            Request Regions Change
+        </button>
+    </div>
 </div>

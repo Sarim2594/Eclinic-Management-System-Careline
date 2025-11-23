@@ -1,21 +1,16 @@
 import * as validate from '../validation_functions.js';
 import * as popup from '../popup_modal.js';
+import { getUser } from '../user_state.js';
 
 let waitingPatientsInterval = null;
 let lastWaitingPatientsCount = 0;
-let allPastPatients = []; // This will now hold basic patient records the doctor has seen
-let currentUser = null;
-
-export function setCurrentUser(data) {
-    currentUser = data;
-}
+let allPastPatients = []; 
 
 export function startWaitingPatientsPolling() {
     if (waitingPatientsInterval) {
         clearInterval(waitingPatientsInterval);
     }
 
-    // Check if we're on the waiting patients tab
     const waitingTab = document.getElementById('doctor-tab-content-waiting');
     if (waitingTab && !waitingTab.classList.contains('hidden')) {
         displayWaitingPatients();
@@ -57,7 +52,7 @@ export function showDoctorTab(tab) {
 }
 
 async function displayWaitingPatients() {
-    const doctor_id = currentUser.doctor_id;
+    const doctor_id = getUser()?.doctor_id;
     const container = document.getElementById('waiting-patients');
     if (!doctor_id || !container) return;
 
@@ -65,10 +60,8 @@ async function displayWaitingPatients() {
         const response = await fetch(`http://localhost:8000/api/doctor/${doctor_id}/waiting-patients`);
         const data = await response.json();
 
-        // Check if number of patients have changed
         if (lastWaitingPatientsCount === data.count) {return}
         
-        // Re-render the waiting patients list
         lastWaitingPatientsCount = data.count;
         if (!data || data.count === 0) {
             container.innerHTML = '<p class="text-gray-500 text-center py-8">✅ No patients waiting!</p>';
@@ -200,7 +193,7 @@ export function searchPastPatients(query = null) {
         const isWithinDateRange = 
             diagnosisDate >= startDate && diagnosisDate < endDate;
             
-        let matchesTextQuery = true; // Default to true if the search box is empty
+        let matchesTextQuery = true; 
 
         if (lowerCaseQuery.length > 0) {
             matchesTextQuery = (
@@ -218,7 +211,7 @@ export function searchPastPatients(query = null) {
 }
 
 async function loadDiagnosedPatients() {
-    const doctor_id = currentUser.doctor_id;
+    const doctor_id = getUser()?.doctor_id;
     const pastPatientsContainer = document.getElementById('past-patients');
     if (!doctor_id || !pastPatientsContainer) return;
 
@@ -234,7 +227,6 @@ async function loadDiagnosedPatients() {
             return;
         }
 
-        // Store all fetched data globally for searching
         allPastPatients = data.patients || [];
         displayDiagnosedPatients(allPastPatients);
 
@@ -245,13 +237,10 @@ async function loadDiagnosedPatients() {
 }
 
 export async function viewPatientHistory(patient_id, event) {
-    // Prevent event bubbling if called from a button
     if (event) {
         event.stopPropagation();
         event.preventDefault();
     }
-    
-    console.log('viewPatientHistory called with patient_id:', patient_id);
     
     const modal = document.getElementById('history-modal');
     const nameEl = document.getElementById('history-patient-name');
@@ -268,13 +257,9 @@ export async function viewPatientHistory(patient_id, event) {
     listEl.innerHTML = '<p class="text-gray-500 text-center py-8">Fetching appointment records...</p>';
     modal.classList.remove('hidden');
     
-    console.log('Modal should be visible now');
-    
     try {
         const response = await fetch(`http://localhost:8000/api/doctor/patient/${patient_id}/history`);
         const data = await response.json();
-
-        console.log('History data received:', data);
 
         if (!data.success) {
             listEl.innerHTML = `<p class="text-red-500 text-center py-8">Error: ${data.detail || 'Could not fetch history'}</p>`;
@@ -364,11 +349,10 @@ export function closeHistoryModal() {
 }
 
 async function loadWaitingPatients() {
-    const doctor_id = currentUser.doctor_id;
+    const doctor_id = getUser()?.doctor_id;
     const container = document.getElementById('waiting-patients');
     if (!doctor_id || !container) return;
 
-    // Reset container to show loading state
     container.innerHTML = '<p class="text-gray-500 text-center py-8">Loading patients...</p>';
 
     try {
@@ -470,10 +454,12 @@ export function togglePatientDetails(appointmentId) {
 export async function submitDiagnosis(appointmentId) {
     const patientId = document.getElementById(`patient-id-${appointmentId}`).value;
     
+    const doctorData = getUser();
+
     // 1. Collect Vitals
     const vitals = {
         blood_pressure: document.getElementById(`vitals-bp-${appointmentId}`) ? document.getElementById(`vitals-bp-${appointmentId}`).value.trim() : '',
-        heart_rate: document.getElementById(`vitals-hr-${appointmentId}`) ? document.getElementById(`vitals-hr-${appointmentId}`).value.trim() : '',
+        heart_rate: document.getElementById(`vitals-hr-${appointmentId}`) ? parseFloat(document.getElementById(`vitals-hr-${appointmentId}`).value) : null,
         temperature: document.getElementById(`vitals-temperature-${appointmentId}`) ? parseFloat(document.getElementById(`vitals-temperature-${appointmentId}`).value) : null,
         bmi: document.getElementById(`vitals-bmi-${appointmentId}`) ? parseFloat(document.getElementById(`vitals-bmi-${appointmentId}`).value) : null,
         blood_oxygen: document.getElementById(`vitals-oxygen-${appointmentId}`) ? parseFloat(document.getElementById(`vitals-oxygen-${appointmentId}`).value) : null,
@@ -492,12 +478,9 @@ export async function submitDiagnosis(appointmentId) {
     }
     
     // 2. Collect Diagnosis Data
-    const diagnosisEl = document.getElementById(`diagnosis-${appointmentId}`);
-    const prescriptionEl = document.getElementById(`prescription-${appointmentId}`);
-    const notesEl = document.getElementById(`notes-${appointmentId}`);
-    const diagnosis = diagnosisEl ? diagnosisEl.value.trim() : '';
-    const prescription = prescriptionEl ? prescriptionEl.value.trim() : '';
-    const notes = notesEl ? notesEl.value.trim() : '';
+    const diagnosis = document.getElementById(`diagnosis-${appointmentId}`)?.value.trim() || '';
+    const prescription = document.getElementById(`prescription-${appointmentId}`)?.value.trim() || '';
+    const notes = document.getElementById(`notes-${appointmentId}`)?.value.trim() || '';
 
     if (!diagnosis || !prescription) {
         popup.showPopUp('Missing Information', 'Please enter both diagnosis and prescription', 'error');
@@ -523,22 +506,20 @@ export async function submitDiagnosis(appointmentId) {
         return;
     }
 
-    // Prepare the data payload
+    // 4. Prepare the data payload and show confirmation
     const diagnosisPayload = {
         appointment_id: appointmentId, 
         patient_id: patientId,         
-        doctor_id: currentUser.doctor_id,
+        doctor_id: doctorData.doctor_id,
         diagnosis,
         prescription,
         notes
     };
     
-    // 4. Show Confirmation Modal and store payload on the button
     const confirmModal = document.getElementById('confirm-modal');
     const confirmButton = document.getElementById('confirm-submit-button');
     
     if (confirmModal && confirmButton) {
-        // Store the payload as a JSON string on a data attribute
         confirmButton.setAttribute('data-diagnosis-payload', JSON.stringify(diagnosisPayload));
         confirmModal.classList.remove('hidden');
     } else {
@@ -548,21 +529,15 @@ export async function submitDiagnosis(appointmentId) {
 
 export async function confirmDiagnosis() {
     const confirmButton = document.getElementById('confirm-submit-button');
-    
-    if (!confirmButton) {
-        console.error("Confirm button not found.");
-        return;
-    }
+    if (!confirmButton) return;
 
     const payloadString = confirmButton.getAttribute('data-diagnosis-payload');
-    
     if (!payloadString) {
         popup.showPopUp('Error', 'Missing diagnosis data. Please resubmit.', 'error');
         closeConfirmModal(); 
         return;
     }
     
-    // Parse the payload and clear the attribute before the API call begins
     let finalDiagnosisData;
     try {
         finalDiagnosisData = JSON.parse(payloadString);
@@ -586,9 +561,8 @@ export async function confirmDiagnosis() {
         closeConfirmModal();
         if (data.success) {
             popup.showPopUp('Diagnosis Submitted!', 'Patient vitals and diagnosis have been recorded successfully.', 'success');
-            // After submitting, reload waiting list instantly (patient disappears)
             loadWaitingPatients().catch(() => {});
-            lastWaitingPatientsCount = -1; // and reduce count to stop unnecessary reload
+            lastWaitingPatientsCount = -1; 
         } else {
             popup.showPopUp('Submission Failed', data.detail || 'Could not submit diagnosis', 'error');
         }
@@ -601,7 +575,6 @@ export function closeConfirmModal() {
     const confirmModal = document.getElementById('confirm-modal');
     if (confirmModal) confirmModal.classList.add('hidden');
     
-    // Clear the data attribute in case the user closes/cancels
     const confirmButton = document.getElementById('confirm-submit-button');
     if (confirmButton) {
         confirmButton.removeAttribute('data-diagnosis-payload');
@@ -609,9 +582,10 @@ export function closeConfirmModal() {
 }
 
 export function setInactiveStatus() {
-    if (currentUser && currentUser.role === 'doctor' && currentUser.doctor_id) {
+    const doctorData = getUser();
+    if (doctorData && doctorData.role === 'doctor' && doctorData.doctor_id) {
         try {
-            fetch(`http://localhost:8000/api/doctor/set-inactive/${currentUser.doctor_id}`, { method: 'PUT' })
+            fetch(`http://localhost:8000/api/doctor/set-inactive/${doctorData.doctor_id}`, { method: 'PUT' })
         } catch (error) {
             console.error('Error setting doctor status to inactive:', error);
         }
