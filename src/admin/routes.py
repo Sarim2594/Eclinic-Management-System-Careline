@@ -6,7 +6,7 @@ from fastapi.requests import Request
 from src.admin.models import ClinicCreate, ReceptionistCreate, DoctorCreate, DoctorTransfer, AvailabilityUpdate, BulletinPost
 from src.admin.request_models import PasswordChangeRequest, ContactChangeRequest
 
-from src.admin.report_services import get_system_statistics, get_all_receptionists, get_available_doctors_for_admin
+from src.admin.report_services import get_system_statistics, get_all_receptionists, get_available_doctors_for_admin, get_all_doctors
 from src.admin.staff_services import create_receptionist_account, create_doctor_account
 from src.admin.clinic_services import create_new_clinic, transfer_doctor_to_clinic
 from src.admin.bulletin_services import post_new_bulletin, deactivate_bulletin
@@ -20,21 +20,31 @@ router = APIRouter()
 # ============================================================================
 
 @router.get("/statistics")
-async def get_statistics(request: Request):
+async def get_statistics(request: Request, company_id: Optional[int] = None):
     """Get comprehensive system statistics"""
     try:
         db = request.app.state.db
-        return get_system_statistics(db)
+        return get_system_statistics(db, company_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.get("/receptionists")
-async def get_receptionists(request: Request):
+async def get_receptionists(request: Request, company_id: Optional[int] = None):
     """Get all receptionist accounts"""
     try:
         db = request.app.state.db
-        return get_all_receptionists(db)
+        return get_all_receptionists(db, company_id)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.get("/doctors")
+async def get_doctors(request:Request, company_id: Optional[int] = None):
+    """Get all doctors, optionally filtered by company"""
+    try:
+        db = request.app.state.db
+        return get_all_doctors(db, company_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -149,6 +159,30 @@ async def delete_bulletin(bulletin_id: int, admin_id: int, request: Request):
         return deactivate_bulletin(db, bulletin_id, admin_id)
     except HTTPException:
         raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+# ============================================================================
+# 5. Change Requests
+# ============================================================================
+
+@router.post("/request-password-change")
+async def request_password_change(change_request: PasswordChangeRequest, request: Request):
+    """Submit a password change request to SuperAdmin"""
+    try:
+        db = request.app.state.db
+        return submit_password_change_request(db, change_request)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    
+@router.post("/request-contact-change")
+async def request_contact_change(change_request: ContactChangeRequest, request: Request):
+    """Submit a contact change request to SuperAdmin"""
+    try:
+        db = request.app.state.db
+        return submit_contact_change_request(db, change_request)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

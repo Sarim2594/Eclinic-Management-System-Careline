@@ -36,7 +36,7 @@ async function getNotifications() {
     
     try {
         // FIX: Use the new /notifications/{role}?user_id={id} structure
-        const url = `http://localhost:8000/api/notifications/${role}` + (userId ? `?user_id=${userId}` : '');
+        const url = `/api/notifications/${role}` + (userId ? `?user_id=${userId}` : '');
             
         const response = await fetch(url);
         const data = await response.json();
@@ -141,7 +141,7 @@ function formatNotificationTime(timestamp) {
 
 export async function markNotificationRead(notificationId) {
     try {
-        const response = await fetch(`http://localhost:8000/api/notifications/mark-read/${notificationId}`, {
+        const response = await fetch(`/api/notifications/mark-read/${notificationId}`, {
             method: 'PUT'
         });
         
@@ -174,7 +174,7 @@ export async function markAllAsRead() {
     
     try {
         // FIX: Use the new /mark-all-read/{role}?user_id={id} structure
-        const url = `http://localhost:8000/api/notifications/mark-all-read/${role}` + (userId ? `?user_id=${userId}` : '');
+        const url = `/api/notifications/mark-all-read/${role}` + (userId ? `?user_id=${userId}` : '');
             
         const response = await fetch(url, { method: 'PUT' });
         const data = await response.json();

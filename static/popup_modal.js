@@ -30,3 +30,50 @@ export function closePopUp() {
     if (!modal) return;
     modal.classList.add('hidden');
 }
+
+export async function showConfirmModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel') {
+    return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+        
+        const modal = document.createElement('div');
+        modal.className = 'bg-white rounded-lg shadow-lg p-6 max-w-sm';
+        
+        const titleEl = document.createElement('h3');
+        titleEl.className = 'text-lg font-semibold text-gray-800 mb-2';
+        titleEl.textContent = title;
+        
+        const messageEl = document.createElement('p');
+        messageEl.className = 'text-gray-600 mb-6';
+        messageEl.textContent = message;
+        
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'flex gap-3 justify-end';
+        
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded font-medium transition';
+        cancelBtn.textContent = cancelText;
+        cancelBtn.onclick = () => {
+            backdrop.remove();
+            resolve(false);
+        };
+        
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition';
+        confirmBtn.textContent = confirmText;
+        confirmBtn.onclick = () => {
+            backdrop.remove();
+            resolve(true);
+        };
+        
+        buttonContainer.appendChild(cancelBtn);
+        buttonContainer.appendChild(confirmBtn);
+        
+        modal.appendChild(titleEl);
+        modal.appendChild(messageEl);
+        modal.appendChild(buttonContainer);
+        backdrop.appendChild(modal);
+        
+        document.body.appendChild(backdrop);
+    });
+}

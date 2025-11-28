@@ -57,7 +57,7 @@ async function displayWaitingPatients() {
     if (!doctor_id || !container) return;
 
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/${doctor_id}/waiting-patients`);
+        const response = await fetch(`/api/doctor/${doctor_id}/waiting-patients`);
         const data = await response.json();
 
         if (lastWaitingPatientsCount === data.count) {return}
@@ -218,7 +218,7 @@ async function loadDiagnosedPatients() {
     pastPatientsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Loading your diagnosed patients...</p>';
 
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/${doctor_id}/past-patients`);
+        const response = await fetch(`/api/doctor/${doctor_id}/past-patients`);
         const data = await response.json();
 
         if (!data || data.count === 0) {
@@ -258,7 +258,7 @@ export async function viewPatientHistory(patient_id, event) {
     modal.classList.remove('hidden');
     
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/patient/${patient_id}/history`);
+        const response = await fetch(`/api/doctor/patient/${patient_id}/history`);
         const data = await response.json();
 
         if (!data.success) {
@@ -356,7 +356,7 @@ async function loadWaitingPatients() {
     container.innerHTML = '<p class="text-gray-500 text-center py-8">Loading patients...</p>';
 
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/${doctor_id}/waiting-patients`);
+        const response = await fetch(`/api/doctor/${doctor_id}/waiting-patients`);
         const data = await response.json();
 
         if (!data || data.count === 0) {
@@ -489,7 +489,7 @@ export async function submitDiagnosis(appointmentId) {
 
     // 3. Submit Vitals
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/record-vitals/${patientId}`, {
+        const response = await fetch(`/api/doctor/record-vitals/${patientId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(vitals)
@@ -550,7 +550,7 @@ export async function confirmDiagnosis() {
     confirmButton.removeAttribute('data-diagnosis-payload'); 
 
     try {
-        const response = await fetch(`http://localhost:8000/api/doctor/submit-diagnosis`, {
+        const response = await fetch(`/api/doctor/submit-diagnosis`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(finalDiagnosisData)
@@ -585,7 +585,7 @@ export function setInactiveStatus() {
     const doctorData = getUser();
     if (doctorData && doctorData.role === 'doctor' && doctorData.doctor_id) {
         try {
-            fetch(`http://localhost:8000/api/doctor/set-inactive/${doctorData.doctor_id}`, { method: 'PUT' })
+            fetch(`/api/doctor/set-inactive/${doctorData.doctor_id}`, { method: 'PUT' })
         } catch (error) {
             console.error('Error setting doctor status to inactive:', error);
         }

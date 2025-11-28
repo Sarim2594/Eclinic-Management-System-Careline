@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, time
 class ClinicCreate(BaseModel):
     name: str
     location: str
+    city_name: str
     company_id: int
     
 class ReceptionistCreate(BaseModel):

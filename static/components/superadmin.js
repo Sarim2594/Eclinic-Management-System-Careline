@@ -2,6 +2,42 @@ import * as popup from '../popup_modal.js';
 import * as bulletins from '../bulletins.js';
 import { getUser } from '../user_state.js';
 
+// Small inline SVG helper to avoid relying on external icon fonts/CDNs
+function svgIcon(name, extraClasses = '') {
+    const base = `class="${extraClasses} inline-block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    switch (name) {
+        case 'eye':
+            return `<svg ${base}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+        case 'trash':
+            return `<svg ${base}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>`;
+        case 'map':
+        case 'map-marked-alt':
+            return `<svg ${base}><path d="M20.5 3.5l-5.5 2.2-6-2.4L3.5 5.5v15l5.5-2.3 6 2.4 5.5-2.2v-15z"></path></svg>`;
+        case 'map-marker':
+        case 'map-pin':
+            return `<svg ${base}><path d="M12 2C8 2 5 5 5 9c0 6 7 13 7 13s7-7 7-13c0-4-3-7-7-7z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>`;
+        case 'ban':
+            return `<svg ${base}><circle cx="12" cy="12" r="9"></circle><line x1="5" y1="5" x2="19" y2="19"></line></svg>`;
+        case 'check':
+        case 'check-circle':
+            return `<svg ${base}><circle cx="12" cy="12" r="9"></circle><path d="M10 13l2 2 4-4"></path></svg>`;
+        case 'envelope':
+            return `<svg ${base}><path d="M3 8l9 6 9-6"></path><rect x="3" y="5" width="18" height="14" rx="2"></rect></svg>`;
+        case 'phone':
+            return `<svg ${base}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.08 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72c.12 1.21.38 2.4.78 3.52a2 2 0 0 1-.45 2.11L8.91 11.09a16 16 0 0 0 6 6l1.74-1.74a2 2 0 0 1 2.11-.45c1.12.4 2.31.66 3.52.78A2 2 0 0 1 22 16.92z"></path></svg>`;
+        case 'info':
+        case 'info-circle':
+            return `<svg ${base}><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="8" x2="12" y2="12"></line><circle cx="12" cy="16" r="0.5"></circle></svg>`;
+        case 'user-shield':
+            return `<svg ${base}><path d="M20 21v-7a4 4 0 0 0-3-3.87"></path><path d="M4 21v-7a4 4 0 0 1 3-3.87"></path><path d="M12 3v4"></path></svg>`;
+        case 'hospital':
+            return `<svg ${base}><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M12 8v8"></path><path d="M9 11h6"></path></svg>`;
+        case 'bullhorn':
+            return `<svg ${base}><path d="M3 11v2a4 4 0 0 0 4 4h1l7 3V8L8 11H7a4 4 0 0 0-4 0z"></path></svg>`;
+        default:
+            return `<svg ${base}><circle cx="12" cy="12" r="10"></circle></svg>`;
+    }
+}
 const pakistanRegions = {
     // ... (Your large region data structure remains here)
     "Punjab": {
@@ -34,12 +70,27 @@ const pakistanRegions = {
 
 let allCompanies = [];
 let allAdmins = [];
-let selectedRegions = [];
+let selectedRegionIds = [];
+let allRegions = [];
 
+async function loadRegionsFromAPI() {
+    try {
+        const response = await fetch('/api/superadmin/regions/all');
+        const data = await response.json();
+        
+        if (data.success) {
+            allRegions = data.regions;
+            return data.grouped;  // Returns {Province: [{id, sub_region}, ...]}
+        }
+        return {};
+    } catch (error) {
+        console.error('Error loading regions:', error);
+        return {};
+    }
+}
 
-// Tab Management
 export function showSuperAdminTab(tabName) {
-    const tabs = ['dashboard', 'companies', 'register-company', 'admins', 'create-admin', 'analytics'];
+    const tabs = ['dashboard', 'companies', 'register-company', 'admins', 'create-admin', 'analytics', 'change-requests'];
     
     tabs.forEach(tab => {
         const btn = document.getElementById(`superadmin-tab-${tab}`);
@@ -61,12 +112,12 @@ export function showSuperAdminTab(tabName) {
     if (tabName === 'admins') loadAllAdmins();
     if (tabName === 'create-admin') loadCompaniesForDropdown();
     if (tabName === 'analytics') loadAnalytics();
+    if (tabName === 'change-requests') loadChangeRequests();
 }
 
-// Load Dashboard
 async function loadDashboard() {
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/dashboard');
+        const response = await fetch('/api/superadmin/dashboard');
         const data = await response.json();
 
         document.getElementById('superadmin-stat-companies').textContent = data.total_companies || 0;
@@ -82,7 +133,6 @@ async function loadDashboard() {
     }
 }
 
-// Display Company Breakdown
 function displayCompanyBreakdown(companies) {
     const tbody = document.getElementById('superadmin-company-breakdown');
     if (!tbody) return;
@@ -106,17 +156,16 @@ function displayCompanyBreakdown(companies) {
             </td>
             <td class="py-3 px-4">
                 <button onclick="viewCompanyDetails('${company.id}')" class="text-blue-600 hover:text-blue-800 mr-3" title="View Details">
-                    <i class="fas fa-eye"></i>
+                    ${svgIcon('eye')}
                 </button>
                 <button onclick="toggleCompanyStatus('${company.id}', '${company.status}')" class="text-${company.status === 'active' ? 'red' : 'green'}-600 hover:text-${company.status === 'active' ? 'red' : 'green'}-800" title="${company.status === 'active' ? 'Deactivate' : 'Activate'}">
-                    <i class="fas fa-${company.status === 'active' ? 'ban' : 'check-circle'}"></i>
+                    ${svgIcon(company.status === 'active' ? 'ban' : 'check')}
                 </button>
             </td>
         </tr>
     `).join('');
 }
 
-// Search Companies in Dashboard
 export function searchCompanies() {
     const query = document.getElementById('company-search').value.toLowerCase();
     const filtered = allCompanies.filter(c => 
@@ -125,7 +174,6 @@ export function searchCompanies() {
     displayCompanyBreakdown(filtered);
 }
 
-// Load All Companies
 async function loadAllCompanies() {
     const container = document.getElementById('companies-list');
     if (!container) return;
@@ -133,7 +181,7 @@ async function loadAllCompanies() {
     container.innerHTML = '<p class="text-gray-500 text-center py-8">Loading companies...</p>';
 
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/companies');
+        const response = await fetch('/api/superadmin/companies');
         const data = await response.json();
 
         allCompanies = data.companies || [];
@@ -144,7 +192,6 @@ async function loadAllCompanies() {
     }
 }
 
-// Display All Companies
 function displayAllCompanies(companies) {
     const container = document.getElementById('companies-list');
     if (!container) return;
@@ -160,13 +207,13 @@ function displayAllCompanies(companies) {
                 <div>
                     <h4 class="text-xl font-bold text-gray-800 mb-2">${company.name}</h4>
                     <p class="text-gray-600 text-sm mb-1">
-                        <i class="fas fa-envelope mr-2"></i>${company.email}
+                        ${svgIcon('envelope','mr-2')}${company.email}
                     </p>
                     <p class="text-gray-600 text-sm mb-1">
-                        <i class="fas fa-phone mr-2"></i>${company.contact}
+                        ${svgIcon('phone','mr-2')}${company.contact}
                     </p>
                     <p class="text-gray-600 text-sm">
-                        <i class="fas fa-map-marker-alt mr-2"></i>${company.address}
+                        ${svgIcon('map-marker','mr-2')}${company.address}
                     </p>
                 </div>
                 <span class="px-3 py-1 ${company.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} rounded-full text-sm font-medium">
@@ -193,17 +240,16 @@ function displayAllCompanies(companies) {
             </div>
             <div class="flex gap-3">
                 <button onclick="viewCompanyDetails('${company.id}')" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
-                    <i class="fas fa-eye mr-2"></i>View Details
+                    ${svgIcon('eye','mr-2')}View Details
                 </button>
                 <button onclick="toggleCompanyStatus('${company.id}', '${company.status}')" class="px-4 py-2 bg-${company.status === 'active' ? 'red' : 'green'}-600 hover:bg-${company.status === 'active' ? 'red' : 'green'}-700 text-white rounded-lg transition-colors">
-                    <i class="fas fa-${company.status === 'active' ? 'ban' : 'check-circle'} mr-2"></i>${company.status === 'active' ? 'Deactivate' : 'Activate'}
+                    ${svgIcon(company.status === 'active' ? 'ban' : 'check','mr-2')}${company.status === 'active' ? 'Deactivate' : 'Activate'}
                 </button>
             </div>
         </div>
     `).join('');
 }
 
-// Search All Companies
 export function searchAllCompanies() {
     const query = document.getElementById('all-companies-search').value.toLowerCase();
     const filtered = allCompanies.filter(c => 
@@ -213,7 +259,6 @@ export function searchAllCompanies() {
     displayAllCompanies(filtered);
 }
 
-// Register Company
 export async function registerCompany() {
     const name = document.getElementById('company-name').value.trim();
     const email = document.getElementById('company-email').value.trim();
@@ -229,7 +274,7 @@ export async function registerCompany() {
     }
 
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/register-company', {
+        const response = await fetch('/api/superadmin/register-company', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -244,7 +289,7 @@ export async function registerCompany() {
             popup.showPopUp('Success', `Company "${name}" registered successfully!`, 'success');
             document.getElementById('company-name').value = '';
             document.getElementById('company-email').value = '';
-            document.getElementById('company-contact').value = '';
+            document.getElementById('company-contact').value = '+92 ';
             document.getElementById('company-reg-number').value = '';
             document.getElementById('company-address').value = '';
             document.getElementById('company-subscription').value = 'basic';
@@ -257,7 +302,6 @@ export async function registerCompany() {
     }
 }
 
-// Load All Admins
 async function loadAllAdmins() {
     const tbody = document.getElementById('admins-list');
     if (!tbody) return;
@@ -265,10 +309,13 @@ async function loadAllAdmins() {
     tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-gray-500">Loading admins...</td></tr>';
 
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/admins');
+        const response = await fetch('/api/superadmin/admins');
         const data = await response.json();
+        
+        console.log('Admins API response:', data);
 
         allAdmins = data.admins || [];
+        console.log('Admins to display:', allAdmins);
         displayAdmins(allAdmins);
         populateCompanyFilter();
     } catch (error) {
@@ -277,7 +324,6 @@ async function loadAllAdmins() {
     }
 }
 
-// Display Admins
 function displayAdmins(admins) {
     const tbody = document.getElementById('admins-list');
     if (!tbody) return;
@@ -299,18 +345,21 @@ function displayAdmins(admins) {
                 <span class="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">${admin.region_count || 0} regions</span>
             </td>
             <td class="py-3 px-4">
-                <button onclick="editAdminRegions('${admin.id}', '${admin.name}', '${admin.company_id}')" class="text-blue-600 hover:text-blue-800 mr-3" title="Edit Regions">
-                    <i class="fas fa-map-marked-alt"></i>
+                <button onclick="editAdminRegions(${admin.id}, '${admin.name.replace(/'/g, "\\'")}', ${admin.company_id})" 
+                    class="inline-flex items-center justify-center w-8 h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors" 
+                    title="Edit Regions">
+                    ${svgIcon('map','')}
                 </button>
-                <button onclick="deleteAdmin('${admin.id}')" class="text-red-600 hover:text-red-800" title="Delete Admin">
-                    <i class="fas fa-trash"></i>
+                <button onclick="deleteAdmin(${admin.id})" 
+                    class="inline-flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors" 
+                    title="Delete Admin">
+                    ${svgIcon('trash','')}
                 </button>
             </td>
         </tr>
     `).join('');
 }
 
-// Search Admins
 export function searchAdmins() {
     const query = document.getElementById('admin-search').value.toLowerCase();
     const filtered = allAdmins.filter(a => 
@@ -321,7 +370,6 @@ export function searchAdmins() {
     displayAdmins(filtered);
 }
 
-// Filter Admins by Company
 export function filterAdminsByCompany() {
     const companyId = document.getElementById('admin-filter-company').value;
     if (!companyId) {
@@ -332,7 +380,6 @@ export function filterAdminsByCompany() {
     displayAdmins(filtered);
 }
 
-// Populate Company Filter
 function populateCompanyFilter() {
     const select = document.getElementById('admin-filter-company');
     if (!select) return;
@@ -346,13 +393,12 @@ function populateCompanyFilter() {
     });
 }
 
-// Load Companies for Dropdown
 async function loadCompaniesForDropdown() {
     const select = document.getElementById('admin-company');
     if (!select) return;
 
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/companies');
+        const response = await fetch('/api/superadmin/companies');
         const data = await response.json();
 
         select.innerHTML = '<option value="">Select company...</option>';
@@ -367,8 +413,7 @@ async function loadCompaniesForDropdown() {
     }
 }
 
-// Load Regions for Company
-export function loadRegionsForCompany() {
+export async function loadRegionsForCompany() {
     const companyId = document.getElementById('admin-company').value;
     if (!companyId) {
         document.getElementById('regions-container').innerHTML = '<p class="text-gray-500 text-center">Select a company to view available regions</p>';
@@ -376,50 +421,51 @@ export function loadRegionsForCompany() {
         return;
     }
 
-    selectedRegions = [];
-    displayRegionCheckboxes('regions-container', 'selected-count');
+    selectedRegionIds = [];
+    const regionsGrouped = await loadRegionsFromAPI();
+    displayRegionCheckboxes('regions-container', 'selected-count', regionsGrouped);
 }
 
-// Display Region Checkboxes (Province > Sub-Region only)
-function displayRegionCheckboxes(containerId, countId) {
+function displayRegionCheckboxes(containerId, countId, regionsGrouped) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
     let html = '';
     
-    for (const [province, subRegions] of Object.entries(pakistanRegions)) {
+    for (const [province, subRegions] of Object.entries(regionsGrouped)) {
         const provinceId = province.replace(/\s/g, '-');
         
         html += `
             <div class="mb-4 border border-gray-200 rounded-lg overflow-hidden">
                 <div class="bg-gradient-to-r from-primary to-red-500 p-3">
-                    <label class="flex items-center cursor-pointer text-white">
-                        <input type="checkbox" 
-                            onchange="toggleProvince('${province}', this.checked, '${containerId}', '${countId}')" 
-                            class="mr-3 w-5 h-5 cursor-pointer"
-                            id="province-${provinceId}-${containerId}">
-                        <span class="font-bold text-lg">
-                            <i class="fas fa-map-marker-alt mr-2"></i>${province}
-                        </span>
-                    </label>
-                </div>
+                        <label class="flex items-center cursor-pointer text-white">
+                            <input type="checkbox" 
+                                onchange="toggleProvince('${province}', this.checked, '${containerId}', '${countId}')" 
+                                class="mr-3 w-5 h-5 cursor-pointer"
+                                id="province-${provinceId}-${containerId}">
+                            <span class="font-bold text-lg">
+                                ${svgIcon('map-marker','mr-2')}${province}
+                            </span>
+                        </label>
+                    </div>
                 <div class="p-3 bg-white">
         `;
         
-        for (const subRegion of Object.keys(subRegions)) {
-            const regionKey = `${province}|${subRegion}`;
-            const subRegionId = subRegion.replace(/\s/g, '-');
+        for (const subRegion of subRegions) {
+            const regionId = subRegion.id;
+            const subRegionSafe = subRegion.sub_region.replace(/\s/g, '-');
             
             html += `
                 <div class="mb-2 ml-4">
                     <label class="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors">
                         <input type="checkbox" 
-                            value="${regionKey}" 
+                            value="${regionId}" 
                             onchange="toggleSubRegion('${containerId}', '${countId}')" 
                             class="mr-3 w-4 h-4 cursor-pointer province-${provinceId}-${containerId} subregion-checkbox"
-                            id="subregion-${provinceId}-${subRegionId}-${containerId}">
+                            id="subregion-${provinceId}-${subRegionSafe}-${containerId}"
+                            data-province="${province}">
                         <span class="font-semibold text-gray-700">
-                            <i class="fas fa-map-pin mr-2 text-primary"></i>${subRegion}
+                            ${svgIcon('map-pin','mr-2 text-primary')}${subRegion.sub_region}
                         </span>
                     </label>
                 </div>
@@ -435,7 +481,6 @@ function displayRegionCheckboxes(containerId, countId) {
     container.innerHTML = html;
 }
 
-// Toggle Province (Select/Deselect all sub-regions)
 window.toggleProvince = function(province, checked, containerId, countId) {
     const provinceId = province.replace(/\s/g, '-');
     const checkboxes = document.querySelectorAll(`#${containerId} .province-${provinceId}-${containerId}`);
@@ -443,14 +488,12 @@ window.toggleProvince = function(province, checked, containerId, countId) {
     toggleSubRegion(containerId, countId);
 }
 
-// Toggle Sub-Region (Update selected regions)
 window.toggleSubRegion = function(containerId, countId) {
     const checkboxes = document.querySelectorAll(`#${containerId} .subregion-checkbox:checked`);
-    selectedRegions = Array.from(checkboxes).map(cb => cb.value);
-    updateSelectedCount(selectedRegions.length, countId);
+    selectedRegionIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    updateSelectedCount(selectedRegionIds.length, countId);
 }
 
-// Update Selected Count Display
 function updateSelectedCount(count, countId = 'selected-count') {
     const countEl = document.getElementById(countId);
     if (countEl) {
@@ -458,7 +501,6 @@ function updateSelectedCount(count, countId = 'selected-count') {
     }
 }
 
-// Assign All Regions
 export function assignAllRegions() {
     const checkboxes = document.querySelectorAll('#regions-container input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = true);
@@ -466,7 +508,6 @@ export function assignAllRegions() {
     popup.showPopUp('Success', 'All regions have been selected!', 'success');
 }
 
-// Create Admin
 export async function createAdmin() {
     const name = document.getElementById('admin-name').value.trim();
     const username = document.getElementById('admin-username').value.trim();
@@ -480,34 +521,36 @@ export async function createAdmin() {
         return;
     }
 
-    if (selectedRegions.length === 0) {
+    if (selectedRegionIds.length === 0) {
         popup.showPopUp('No Regions', 'Please assign at least one region to the admin', 'error');
         return;
     }
 
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/create-admin', {
+        const response = await fetch('/api/superadmin/create-admin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name, username, email, password, contact,
                 company_id: companyId,
-                assigned_regions: selectedRegions
+                assigned_region_ids: selectedRegionIds  // Changed from assigned_regions
             })
         });
 
         const data = await response.json();
 
         if (data.success) {
-            popup.showPopUp('Success', `Admin "${name}" created successfully with ${selectedRegions.length} regions!`, 'success');
+            popup.showPopUp('Success', `Admin "${name}" created successfully with ${selectedRegionIds.length} regions!`, 'success');
+            
+            // Clear form
             document.getElementById('admin-name').value = '';
             document.getElementById('admin-username').value = '';
             document.getElementById('admin-email').value = '';
             document.getElementById('admin-password').value = '';
-            document.getElementById('admin-contact').value = '';
+            document.getElementById('admin-contact').value = '+92 ';
             document.getElementById('admin-company').value = '';
             document.getElementById('regions-container').innerHTML = '<p class="text-gray-500 text-center">Select a company to view available regions</p>';
-            selectedRegions = [];
+            selectedRegionIds = [];
             updateSelectedCount(0);
         } else {
             popup.showPopUp('Error', data.detail || 'Failed to create admin', 'error');
@@ -517,31 +560,34 @@ export async function createAdmin() {
     }
 }
 
-// Edit Admin Regions
-window.editAdminRegions = async function(adminId, adminName, companyId) {
+export async function editAdminRegions(adminId, adminName, companyId) {
     document.getElementById('edit-admin-id').value = adminId;
     document.getElementById('edit-admin-info').textContent = adminName;
 
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/admin/${adminId}/regions`);
+        // Get admin's current regions
+        const response = await fetch(`/api/superadmin/admin/${adminId}/regions`);
         const data = await response.json();
 
-        selectedRegions = data.assigned_regions || [];
-        displayRegionCheckboxes('edit-regions-container', 'edit-selected-count');
+        // Load all available regions
+        const regionsGrouped = await loadRegionsFromAPI();
+        
+        selectedRegionIds = data.assigned_regions ? data.assigned_regions.map(r => r.id) : [];
+        displayRegionCheckboxes('edit-regions-container', 'edit-selected-count', regionsGrouped);
 
-        selectedRegions.forEach(region => {
-            const checkbox = document.querySelector(`#edit-regions-container input[value="${region}"]`);
+        // Check the already assigned regions
+        selectedRegionIds.forEach(regionId => {
+            const checkbox = document.querySelector(`#edit-regions-container input[value="${regionId}"]`);
             if (checkbox) checkbox.checked = true;
         });
 
-        updateSelectedCount(selectedRegions.length, 'edit-selected-count');
+        updateSelectedCount(selectedRegionIds.length, 'edit-selected-count');
         document.getElementById('edit-admin-modal').classList.remove('hidden');
     } catch (error) {
         popup.showPopUp('Error', 'Failed to load admin regions', 'error');
     }
 }
 
-// Assign All Regions in Edit Modal
 export function assignAllRegionsEdit() {
     const checkboxes = document.querySelectorAll('#edit-regions-container input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = true);
@@ -549,27 +595,26 @@ export function assignAllRegionsEdit() {
     popup.showPopUp('Success', 'All regions have been selected!', 'success');
 }
 
-// Update Admin Regions
 export async function updateAdminRegions() {
     const adminId = document.getElementById('edit-admin-id').value;
     toggleSubRegion('edit-regions-container', 'edit-selected-count');
 
-    if (selectedRegions.length === 0) {
+    if (selectedRegionIds.length === 0) {
         popup.showPopUp('No Regions', 'Please assign at least one region', 'error');
         return;
     }
 
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/admin/${adminId}/regions`, {
+        const response = await fetch(`/api/superadmin/admin/${adminId}/regions`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assigned_regions: selectedRegions })
+            body: JSON.stringify({ assigned_region_ids: selectedRegionIds })  // Changed
         });
 
         const data = await response.json();
 
         if (data.success) {
-            popup.showPopUp('Success', `Admin regions updated successfully! ${selectedRegions.length} regions assigned.`, 'success');
+            popup.showPopUp('Success', `Admin regions updated successfully! ${selectedRegionIds.length} regions assigned.`, 'success');
             closeEditAdminModal();
             loadAllAdmins();
         } else {
@@ -580,18 +625,23 @@ export async function updateAdminRegions() {
     }
 }
 
-// Close Edit Admin Modal
 export function closeEditAdminModal() {
     document.getElementById('edit-admin-modal').classList.add('hidden');
     selectedRegions = [];
 }
 
-// Delete Admin
-window.deleteAdmin = async function(adminId) {
-    if (!confirm('Are you sure you want to delete this admin? This action cannot be undone.')) return;
+export async function deleteAdmin(adminId) {
+    const confirmed = await showConfirmModal(
+        'Delete Admin',
+        'Are you sure you want to delete this admin? This action cannot be undone.',
+        'Delete',
+        'Cancel'
+    );
+    
+    if (!confirmed) return;
 
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/admin/${adminId}`, {
+        const response = await fetch(`/api/superadmin/admin/${adminId}`, {
             method: 'DELETE'
         });
 
@@ -608,10 +658,9 @@ window.deleteAdmin = async function(adminId) {
     }
 }
 
-// View Company Details - Updated to show admin regions
-window.viewCompanyDetails = async function(companyId) {
+export async function viewCompanyDetails(companyId) {
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/companies`);
+        const response = await fetch(`/api/superadmin/companies`);
         const data = await response.json();
         
         const company = data.companies.find(c => c.id == companyId);
@@ -620,7 +669,7 @@ window.viewCompanyDetails = async function(companyId) {
             return;
         }
 
-        const statsResponse = await fetch(`http://localhost:8000/api/superadmin/dashboard`);
+        const statsResponse = await fetch(`/api/superadmin/dashboard`);
         const statsData = await statsResponse.json();
         const companyStats = statsData.companies.find(c => c.id == companyId);
 
@@ -644,7 +693,7 @@ window.viewCompanyDetails = async function(companyId) {
                     <div class="p-6">
                         <div class="bg-blue-50 rounded-lg p-4 mb-6">
                             <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                <i class="fas fa-info-circle text-blue-600 mr-2"></i>
+                                ${svgIcon('info','text-blue-600 mr-2')}
                                 Company Information
                             </h4>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -692,7 +741,7 @@ window.viewCompanyDetails = async function(companyId) {
 
                         <div class="bg-white rounded-lg border p-4 mb-6">
                             <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                <i class="fas fa-user-shield text-primary mr-2"></i>
+                                ${svgIcon('user-shield','text-primary mr-2')}
                                 Company Admins & Their Regions
                             </h4>
                             <div id="company-admins-list" class="space-y-2">
@@ -702,7 +751,7 @@ window.viewCompanyDetails = async function(companyId) {
 
                         <div class="bg-white rounded-lg border p-4 mb-6">
                             <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                <i class="fas fa-hospital text-primary mr-2"></i>
+                                ${svgIcon('hospital','text-primary mr-2')}
                                 Company Clinics
                             </h4>
                             <div id="company-clinics-list" class="space-y-2">
@@ -712,7 +761,7 @@ window.viewCompanyDetails = async function(companyId) {
 
                         <div class="bg-white rounded-lg border p-4 mb-6">
                             <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                <i class="fas fa-bullhorn text-primary mr-2"></i>
+                                ${svgIcon('bullhorn','text-primary mr-2')}
                                 Company Bulletins
                             </h4>
                             <div id="company-bulletins-list" class="space-y-2">
@@ -723,7 +772,7 @@ window.viewCompanyDetails = async function(companyId) {
                         <div class="flex gap-3">
                             <button onclick="toggleCompanyStatus('${company.id}', '${company.status}')" 
                                 class="flex-1 px-4 py-2 bg-${company.status === 'active' ? 'red' : 'green'}-600 hover:bg-${company.status === 'active' ? 'red' : 'green'}-700 text-white rounded-lg transition-colors">
-                                <i class="fas fa-${company.status === 'active' ? 'ban' : 'check-circle'} mr-2"></i>
+                                ${svgIcon(company.status === 'active' ? 'ban' : 'check','mr-2')}
                                 ${company.status === 'active' ? 'Deactivate' : 'Activate'} Company
                             </button>
                         </div>
@@ -748,10 +797,9 @@ window.viewCompanyDetails = async function(companyId) {
     }
 }
 
-// Load Company Admins with Regions
 async function loadCompanyAdminsWithRegions(companyId) {
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/company/${companyId}/admins-with-regions`);
+        const response = await fetch(`/api/superadmin/company/${companyId}/admins-with-regions`);
         const data = await response.json();
         
         const container = document.getElementById('company-admins-list');
@@ -763,15 +811,17 @@ async function loadCompanyAdminsWithRegions(companyId) {
         }
 
         container.innerHTML = data.admins.map(admin => {
+            // Group regions by province
             const regionsByProvince = {};
             admin.regions.forEach(region => {
-                const [province, subRegion] = region.split('|');
+                const province = region.province;
                 if (!regionsByProvince[province]) {
                     regionsByProvince[province] = [];
                 }
-                regionsByProvince[province].push(subRegion);
+                regionsByProvince[province].push(region.sub_region);
             });
 
+            // Format regions display
             const regionsDisplay = Object.entries(regionsByProvince).map(([province, subRegions]) => {
                 return `<div class="mb-2">
                     <span class="font-semibold text-primary">${province}:</span>
@@ -805,20 +855,23 @@ async function loadCompanyAdminsWithRegions(companyId) {
     }
 }
 
-// Close modal when clicking outside
 window.closeCompanyDetailsOnOutsideClick = function(event) {
     if (event.target.id === 'company-details-modal') {
         closeCompanyDetailsModal();
     }
 }
 
-// Load Company Clinics
+export function closeCompanyDetailsModal() {
+    const modal = document.getElementById('company-details-modal');
+    if (modal) modal.remove();
+}
+
 async function loadCompanyClinics(companyId) {
     try {
         const container = document.getElementById('company-clinics-list');
         if (!container) return;
 
-        const clinicsResponse = await fetch(`http://localhost:8000/api/superadmin/company/${companyId}/clinics`);
+        const clinicsResponse = await fetch(`/api/superadmin/company/${companyId}/clinics`);
         const clinicsData = await clinicsResponse.json();
 
         if (clinicsData.success && clinicsData.clinics) {
@@ -827,7 +880,7 @@ async function loadCompanyClinics(companyId) {
                     <div>
                         <p class="font-semibold text-gray-800">${clinic.name}</p>
                         <p class="text-sm text-gray-600">
-                            <i class="fas fa-map-marker-alt mr-1"></i>${clinic.location} (${clinic.city})
+                            ${svgIcon('map-marker','mr-1')}${clinic.location} (${clinic.city})
                         </p>
                     </div>
                     <div class="text-right">
@@ -848,21 +901,59 @@ async function loadCompanyClinics(companyId) {
     }
 }
 
-// Close Company Details Modal
-window.closeCompanyDetailsModal = function() {
-    const modal = document.getElementById('company-details-modal');
-    if (modal) modal.remove();
+function showConfirmModal(title, message, confirmText, cancelText) {
+    return new Promise((resolve) => {
+        const modalHTML = `
+            <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+                    <div class="p-6">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">${title}</h3>
+                        <p class="text-gray-600 mb-6">${message}</p>
+                        <div class="flex gap-3 justify-end">
+                            <button onclick="window.resolveConfirm(false)" 
+                                class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg font-medium transition-colors">
+                                ${cancelText}
+                            </button>
+                            <button onclick="window.resolveConfirm(true)" 
+                                class="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
+                                ${confirmText}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const existing = document.getElementById('confirm-modal');
+        if (existing) existing.remove();
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+        window.resolveConfirm = (result) => {
+            const modal = document.getElementById('confirm-modal');
+            if (modal) modal.remove();
+            delete window.resolveConfirm;
+            resolve(result);
+        };
+    });
 }
 
-// Toggle Company Status
-window.toggleCompanyStatus = async function(companyId, currentStatus) {
+export async function toggleCompanyStatus(companyId, currentStatus) {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     const action = newStatus === 'active' ? 'activate' : 'deactivate';
     
-    if (!confirm(`Are you sure you want to ${action} this company?`)) return;
+    // Use custom confirmation modal
+    const confirmed = await showConfirmModal(
+        `${action.charAt(0).toUpperCase() + action.slice(1)} Company`,
+        `Are you sure you want to ${action} this company? This will affect all associated clinics, doctors, and staff.`,
+        action === 'active' ? 'Activate' : 'Deactivate',
+        'Cancel'
+    );
+    
+    if (!confirmed) return;
 
     try {
-        const response = await fetch(`http://localhost:8000/api/superadmin/company/${companyId}/status`, {
+        const response = await fetch(`/api/superadmin/company/${companyId}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
@@ -874,6 +965,7 @@ window.toggleCompanyStatus = async function(companyId, currentStatus) {
             popup.showPopUp('Success', `Company ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`, 'success');
             loadDashboard();
             loadAllCompanies();
+            closeCompanyDetailsModal();
         } else {
             popup.showPopUp('Error', data.detail || 'Failed to update status', 'error');
         }
@@ -882,10 +974,9 @@ window.toggleCompanyStatus = async function(companyId, currentStatus) {
     }
 }
 
-// Load Analytics
 async function loadAnalytics() {
     try {
-        const response = await fetch('http://localhost:8000/api/superadmin/analytics');
+        const response = await fetch('/api/superadmin/analytics');
         const data = await response.json();
 
         // Display top companies
@@ -992,5 +1083,116 @@ async function loadAnalytics() {
     }
 }
 
-// Export pakistan regions for use in other files
+// ============================================================================
+// CHANGE REQUESTS MANAGEMENT
+// ============================================================================
+
+async function loadChangeRequests() {
+    try {
+        const response = await fetch('/api/superadmin/change-requests');
+        const data = await response.json();
+        
+        const tbody = document.getElementById('change-requests-body');
+        if (!tbody) return;
+        
+        if (!data.success || !data.requests || data.requests.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-500">No pending change requests</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = data.requests.map(req => {
+            const requestType = req.request_type === 'password_reset' ? 'Password Reset' : 
+                              req.request_type === 'contact_change' ? 'Contact Change' : 'Regions Change';
+            const createdDate = new Date(req.created_at).toLocaleDateString();
+            
+            return `
+                <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td class="py-3 px-4 font-medium">${req.admin_name}</td>
+                    <td class="py-3 px-4">${req.company_name}</td>
+                    <td class="py-3 px-4">
+                        <span class="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">${requestType}</span>
+                    </td>
+                    <td class="py-3 px-4 text-sm max-w-xs truncate">${req.reason || 'No reason provided'}</td>
+                    <td class="py-3 px-4 text-sm text-gray-600">${createdDate}</td>
+                    <td class="py-3 px-4">
+                        <div class="flex gap-2">
+                            <button onclick="approveChangeRequest(${req.id})" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition-colors inline-flex items-center gap-1 w-8 h-8 justify-center">
+                                ${svgIcon('check-circle', 'w-4 h-4')}
+                            </button>
+                            <button onclick="rejectChangeRequest(${req.id})" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium transition-colors inline-flex items-center gap-1 w-8 h-8 justify-center">
+                                ${svgIcon('ban', 'w-4 h-4')}
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Error loading change requests:', error);
+        popup.showPopUp('Error', 'Failed to load change requests', 'error');
+    }
+}
+
+window.approveChangeRequest = async function(requestId) {
+    const confirmed = await popup.showConfirmModal(
+        'Approve Change Request',
+        'Are you sure you want to approve this change request?',
+        'Approve',
+        'Cancel'
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+        const response = await fetch(`/api/superadmin/change-request/${requestId}/approve`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            popup.showPopUp('Success', 'Change request approved successfully', 'success');
+            loadChangeRequests();
+        } else {
+            popup.showPopUp('Error', data.detail || 'Failed to approve request', 'error');
+        }
+    } catch (error) {
+        console.error('Error approving request:', error);
+        popup.showPopUp('Error', 'An error occurred while approving the request', 'error');
+    }
+};
+
+window.rejectChangeRequest = async function(requestId) {
+    const rejectReason = prompt('Enter rejection reason:', '');
+    if (rejectReason === null) return; // User cancelled
+    
+    try {
+        const response = await fetch(`/api/superadmin/change-request/${requestId}/reject`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: rejectReason })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            popup.showPopUp('Success', 'Change request rejected', 'success');
+            loadChangeRequests();
+        } else {
+            popup.showPopUp('Error', data.detail || 'Failed to reject request', 'error');
+        }
+    } catch (error) {
+        console.error('Error rejecting request:', error);
+        popup.showPopUp('Error', 'An error occurred while rejecting the request', 'error');
+    }
+};
+
+// Attach to window for backward compatibility with onclick handlers
+window.viewCompanyDetails = viewCompanyDetails;
+window.toggleCompanyStatus = toggleCompanyStatus;
+window.closeCompanyDetailsModal = closeCompanyDetailsModal;
+window.closeCompanyDetailsOnOutsideClick = closeCompanyDetailsOnOutsideClick;
+window.deleteAdmin = deleteAdmin;
+window.editAdminRegions = editAdminRegions;
+window.loadChangeRequests = loadChangeRequests;
+
 export { pakistanRegions };

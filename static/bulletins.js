@@ -1,4 +1,4 @@
-import { showPopUp } from "./popup_modal.js";
+import { showPopUp, showConfirmModal } from "./popup_modal.js";
 import { getUser } from "./user_state.js";
 
 // Load bulletins for main page view
@@ -12,9 +12,9 @@ export async function loadBulletins() {
         return;
     }
 
-    let endpoint = `http://localhost:8000/api/bulletins`;
+    let endpoint = `/api/bulletins`;
     if (currentUser.role === 'admin' && currentUser.admin_id) {
-        endpoint = `http://localhost:8000/api/bulletins/admin/${currentUser.admin_id}`;
+        endpoint = `/api/bulletins/admin/${currentUser.admin_id}`;
     }
 
     const res = await fetch(endpoint);
@@ -28,7 +28,7 @@ export async function loadBulletins() {
     
     if ((currentUser.role === 'doctor' || currentUser.role === 'receptionist')) {
         try {
-            const clinicRes = await fetch(`http://localhost:8000/api/clinic/${currentUser.clinic_id}/company`);
+            const clinicRes = await fetch(`/api/clinic/${currentUser.clinic_id}/company`);
             const clinicData = await clinicRes.json();
             
             if (clinicData.success && clinicData.company_id) {
@@ -77,7 +77,7 @@ export async function loadBulletins() {
 // Load bulletins for a specific company (used in superadmin company details modal)
 export async function loadCompanyBulletins(companyId, containerId) {
     try {
-        const res = await fetch(`http://localhost:8000/api/bulletins/company/${companyId}`);
+        const res = await fetch(`/api/bulletins/company/${companyId}`);
         const data = await res.json();
         
         const container = document.getElementById(containerId);
@@ -110,7 +110,15 @@ export async function loadCompanyBulletins(companyId, containerId) {
 }
 
 window.deleteBulletin = async function(bulletinId) {
-    if (!confirm('Are you sure you want to delete this bulletin?')) return;
+    // Use custom confirmation modal
+    const confirmed = await showConfirmModal(
+        'Delete Bulletin',
+        'Are you sure you want to delete this bulletin? This action cannot be undone.',
+        'Delete',
+        'Cancel'
+    );
+    
+    if (!confirmed) return;
     
     const currentUser = getUser();
     if (!currentUser || !currentUser.admin_id) {
@@ -119,7 +127,7 @@ window.deleteBulletin = async function(bulletinId) {
     }
     
     try {
-        const res = await fetch(`http://localhost:8000/api/admin/delete-bulletin/${bulletinId}?admin_id=${currentUser.admin_id}`, {
+        const res = await fetch(`/api/admin/delete-bulletin/${bulletinId}?admin_id=${currentUser.admin_id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -134,6 +142,6 @@ window.deleteBulletin = async function(bulletinId) {
         }
     } catch (error) {
         console.error('Error deleting bulletin:', error);
-        showPopUp("Error", `An unexpected error occurred while trying to delete bulletin with id: ${bulletinId}`, "error");
+        showPopUp("Error", `An unexpected error occurred while trying to delete bulletin`, "error");
     }
 }

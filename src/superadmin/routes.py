@@ -10,7 +10,8 @@ from src.superadmin.dashboard_services import get_system_dashboard_data, get_all
 from src.superadmin.company_services import register_new_company, update_company_status, get_clinics_by_company
 from src.superadmin.admin_services import (
     get_all_admins_with_details, create_new_admin, get_admin_assigned_regions, 
-    update_admin_assigned_regions, update_admin_contact_number, delete_admin_account
+    update_admin_assigned_regions, update_admin_contact_number, delete_admin_account,
+    get_admins_by_company
 )
 from src.superadmin.analytics_services import get_platform_analytics
 from src.superadmin.change_request_services import get_pending_change_requests, approve_admin_change_request, reject_admin_change_request
@@ -48,6 +49,16 @@ async def get_company_clinics(request: Request, company_id: int = Path(...)):
     try:
         db = request.app.state.db
         return get_clinics_by_company(db, company_id)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    
+@router.get("/company/{company_id}/admins-with-regions")
+async def get_company_admins_with_regions(company_id: int, request: Request):
+    """Get all clinics for a specific company"""
+    try:
+        db = request.app.state.db
+        return get_admins_by_company(db, company_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

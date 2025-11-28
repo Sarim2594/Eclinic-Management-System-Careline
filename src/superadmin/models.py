@@ -11,6 +11,8 @@ class CompanyCreate(BaseModel):
     contact: str
     registration_number: str
     address: str
+    subscription_plan: str = 'basic'
+    max_clinics: int = 5
 
 class AdminCreate(BaseModel):
     name: str
@@ -19,10 +21,10 @@ class AdminCreate(BaseModel):
     password: str
     contact: str
     company_id: int
-    assigned_regions: List[str]
+    assigned_region_ids: List[int]
 
 class AdminRegionsUpdate(BaseModel):
-    assigned_regions: List[str]
+    assigned_region_ids: List[int]
 
 class CompanyStatusUpdate(BaseModel):
     status: str

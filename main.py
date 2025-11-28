@@ -9,10 +9,8 @@ import traceback
 import os
 from dotenv import load_dotenv
 
-# --- CORE IMPORTS (Your DB connection is here) ---
 from database import Database
 
-# --- IMPORTS FOR NEW MODULAR ROUTERS (All required files) ---
 from src.auth.routes import router as auth_router
 from src.notifications.routes import router as notification_router
 from src.bulletins.routes import router as bulletin_router 
@@ -43,7 +41,6 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Cleanup
     db.close()
 
 app = FastAPI(

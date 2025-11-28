@@ -46,9 +46,10 @@ def approve_admin_change_request(db, request_id: int) -> Dict[str, Any]:
         
         # 2. Process based on request type
         if request_type == 'password_reset':
-            new_password_hash = hashlib.sha256(requested_data.encode()).hexdigest()
+            # `requested_data` already contains the SHA256 hash of the new password (stored at request time),
+            # so do not re-hash it here — just apply it directly.
             cursor.execute("UPDATE users SET password = %s WHERE id = (SELECT user_id FROM admins WHERE id = %s)", 
-                           (new_password_hash, admin_id))
+                           (requested_data, admin_id))
             
         elif request_type == 'contact_change':
             cursor.execute("UPDATE admins SET contact = %s WHERE id = %s", (requested_data, admin_id))

@@ -7,13 +7,45 @@ from typing import Dict, Any
 # ============================================================================
 
 def create_new_clinic(db, clinic: ClinicCreate) -> Dict[str, Any]:
-    """Inserts a new clinic record into the database, including company_id."""
+    """Creates a new clinic with proper region validation"""
     with db.get_cursor() as cursor:
+        # 1. Verify company exists and check clinic limit
         cursor.execute("""
-            INSERT INTO clinics (name, location, company_id)
-            VALUES (%s, %s, %s)
+            SELECT c.max_clinics, COUNT(cl.id) as current_clinics
+            FROM companies c
+            LEFT JOIN clinics cl ON c.id = cl.company_id AND cl.status = 'active'
+            WHERE c.id = %s
+            GROUP BY c.id, c.max_clinics
+        """, (clinic.company_id,))
+        
+        company_data = cursor.fetchone()
+        if not company_data:
+            raise HTTPException(status_code=404, detail="Company not found")
+        
+        if company_data['current_clinics'] >= company_data['max_clinics']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Clinic limit reached. Maximum {company_data['max_clinics']} clinics allowed."
+            )
+        
+        # 2. Look up city_id from city name
+        cursor.execute("""
+            SELECT id FROM cities WHERE name = %s
+        """, (clinic.city_name,))
+        
+        city = cursor.fetchone()
+        if not city:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"City '{clinic.city_name}' not found in database"
+            )
+        
+        # 3. Insert clinic
+        cursor.execute("""
+            INSERT INTO clinics (company_id, name, location, city_id)
+            VALUES (%s, %s, %s, %s)
             RETURNING id
-        """, (clinic.name, clinic.location, clinic.company_id))
+        """, (clinic.company_id, clinic.name, clinic.location, city['id']))
         
         clinic_id = cursor.fetchone()['id']
         

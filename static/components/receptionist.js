@@ -189,7 +189,7 @@ export async function registerPatient() {
             nationality: document.getElementById('patient-nationality').value.trim(),
         };
 
-        const response = await fetch(`http://localhost:8000/api/receptionist/register-patient`, {
+        const response = await fetch(`/api/receptionist/register-patient`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -203,7 +203,16 @@ export async function registerPatient() {
             // Clear form
             document.getElementById('patient-mr').value = '';
             document.getElementById('patient-name').value = '';
-            // ... (rest of form clearing)
+            document.getElementById('patient-age').value = '';
+            document.getElementById('patient-email').value = '';
+            document.getElementById('patient-gender').value = '';
+            document.getElementById('patient-father-name').value = '';
+            document.getElementById('patient-marital-status').value = '';
+            document.getElementById('patient-contact').value = '+92 ';
+            document.getElementById('patient-address').value = '';
+            document.getElementById('patient-cnic').value = '';
+            document.getElementById('patient-occupation').value = '';
+            document.getElementById('patient-nationality').value = '';
         } else {
             popup.showPopUp('Registration Failed', data.detail || 'Could not register patient', 'error');
         }
@@ -235,7 +244,7 @@ async function displayDiagnoses(filteredDiagnoses = null) {
     }
 
     try {
-        const response = await fetch('http://localhost:8000/api/receptionist/get-diagnoses');
+        const response = await fetch('/api/receptionist/get-diagnoses');
         const data = await response.json();
         
         if (loadingEl) loadingEl.classList.add('hidden');

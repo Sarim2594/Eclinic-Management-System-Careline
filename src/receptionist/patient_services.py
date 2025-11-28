@@ -14,7 +14,8 @@ def register_new_patient_and_assign_doctor(db, patient: PatientCreate) -> Dict[s
     try:
         with db.get_cursor() as cursor:
             # 1. Validate clinic exists
-            cursor.execute("SELECT id, name FROM clinics WHERE id = %s", (patient.clinic_id,))
+            # include company_id and city_id so we can target company admins for notifications
+            cursor.execute("SELECT id, name, company_id, city_id FROM clinics WHERE id = %s", (patient.clinic_id,))
             clinic = cursor.fetchone()
             if not clinic:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Clinic not found')
@@ -33,17 +34,79 @@ def register_new_patient_and_assign_doctor(db, patient: PatientCreate) -> Dict[s
             if not doctors:
                 message = f'No doctors available at the selected clinic. Patient {patient.name} could not be registered.'
                 title = 'No Doctors Available'
-                # Insert notification logic (extracted from original file)
-                cursor.execute("""INSERT INTO notifications (recipient_type, type, clinic_id, clinic_name, title, message)
-                                  VALUES (%s, NULL, %s, %s, %s, %s)""", ('admin', patient.clinic_id, clinic['name'], title, message))
+                # Notify only admins who manage the region of this clinic
+                notified_admin_ids = []
+                # Determine region_id for the clinic via its city
+                region_id = None
+                if clinic.get('city_id'):
+                    cursor.execute("SELECT region_id FROM cities WHERE id = %s", (clinic['city_id'],))
+                    city_row = cursor.fetchone()
+                    if city_row:
+                        region_id = city_row.get('region_id')
+
+                if region_id:
+                    cursor.execute(
+                        """SELECT a.id FROM admins a JOIN admin_regions ar ON a.id = ar.admin_id
+                           WHERE a.company_id = %s AND ar.region_id = %s""",
+                        (clinic['company_id'], region_id)
+                    )
+                    admins = cursor.fetchall()
+                else:
+                    admins = []
+
+                if admins:
+                    for a in admins:
+                        cursor.execute(
+                            """INSERT INTO notifications (recipient_type, recipient_id, type, clinic_id, clinic_name, title, message) VALUES (%s, %s, %s, %s, %s, %s, %s) """,
+                            ('admin', a['id'], 'no_doctors_available', patient.clinic_id, clinic['name'], title, message)
+                        )
+                        notified_admin_ids.append(a['id'])
+                    # Debug log: which admins were notified
+                    print(f"[notifications] no_doctors_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
+                else:
+                    # Fallback: create a general admin-level notification without recipient_id is invalid per constraint,
+                    # so insert as a superadmin notification so the platform operators still see it.
+                    cursor.execute(
+                        """INSERT INTO notifications (recipient_type, type, clinic_id, clinic_name, title, message) VALUES (%s, %s, %s, %s, %s, %s) """,
+                        ('superadmin', 'no_doctors_available', patient.clinic_id, clinic['name'], title, message)
+                    )
                 return {'success': False, 'detail': "No doctors available at the selected clinic. Please try again after a few minutes."}
             
             if not available_doctors:
                 message = f'No doctors currently available at {clinic["name"]} during operating hours. Patient {patient.name} attempted registration.'
                 title = 'No Doctors Currently Available'
-                # Insert notification logic (extracted from original file)
-                cursor.execute("""INSERT INTO notifications (recipient_type, type, clinic_id, clinic_name, title, message)
-                                  VALUES (%s, NULL, %s, %s, %s, %s)""", ('admin', patient.clinic_id, clinic['name'], title, message))
+                # Notify only admins who manage the region of this clinic
+                notified_admin_ids = []
+                region_id = None
+                if clinic.get('city_id'):
+                    cursor.execute("SELECT region_id FROM cities WHERE id = %s", (clinic['city_id'],))
+                    city_row = cursor.fetchone()
+                    if city_row:
+                        region_id = city_row.get('region_id')
+
+                if region_id:
+                    cursor.execute(
+                        """SELECT a.id FROM admins a JOIN admin_regions ar ON a.id = ar.admin_id
+                           WHERE a.company_id = %s AND ar.region_id = %s""",
+                        (clinic['company_id'], region_id)
+                    )
+                    admins = cursor.fetchall()
+                else:
+                    admins = []
+
+                if admins:
+                    for a in admins:
+                        cursor.execute(
+                            """INSERT INTO notifications (recipient_type, recipient_id, type, clinic_id, clinic_name, title, message) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                            ('admin', a['id'], 'no_doctors_currently_available', patient.clinic_id, clinic['name'], title, message)
+                        )
+                        notified_admin_ids.append(a['id'])
+                    print(f"[notifications] no_doctors_currently_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
+                else:
+                    cursor.execute(
+                        """INSERT INTO notifications (recipient_type, type, clinic_id, clinic_name, title, message) VALUES (%s, %s, %s, %s, %s, %s)""",
+                        ('superadmin', 'no_doctors_currently_available', patient.clinic_id, clinic['name'], title, message)
+                    )
                 return {'success': False, 'detail': "No doctors are currently available at the selected clinic. Please try again after a few minutes."}
 
             # 5. Generate ticket number

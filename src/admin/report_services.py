@@ -6,106 +6,186 @@ from datetime import datetime
 # REPORTING & STATISTICS SERVICES
 # ============================================================================
 
-def get_system_statistics(db) -> Dict[str, Any]:
-    """Retrieves comprehensive system statistics and breakdowns."""
+def get_system_statistics(db, company_id) -> Dict[str, Any]:
+    """Get statistics for admin dashboard"""
     try:
         with db.get_cursor() as cursor:
-            # --- Overall stats ---
-            cursor.execute("SELECT COUNT(*) as count FROM clinics")
-            total_clinics = cursor.fetchone()['count']
-            # ... (rest of overall stats queries) ...
-            cursor.execute("SELECT COUNT(*) as count FROM doctors WHERE status = 'active'")
-            total_doctors = cursor.fetchone()['count']
+            # Add WHERE clause if company_id provided
+            company_filter = "WHERE cl.company_id = %s" if company_id else ""
+            params = [company_id] if company_id else []
             
-            cursor.execute("SELECT COUNT(*) as count FROM patients")
-            total_patients = cursor.fetchone()['count']
-            
-            cursor.execute("SELECT COUNT(*) as count FROM appointments WHERE status = 'waiting'")
-            active_appointments = cursor.fetchone()['count']
-            
-            # --- Per-clinic stats ---
-            cursor.execute("""
+            # Get overview statistics
+            cursor.execute(f"""
                 SELECT 
-                    c.id as clinic_id,
-                    c.name,
-                    c.location,
-                    COUNT(DISTINCT d.id) FILTER (WHERE d.status = 'active') as total_doctors,
-                    COUNT(DISTINCT a.patient_id) as total_patients,
-                    COUNT(DISTINCT a.id) FILTER (WHERE a.status = 'waiting') as waiting_patients
-                FROM clinics c
-                LEFT JOIN doctors d ON c.id = d.clinic_id
-                LEFT JOIN appointments a ON c.id = a.clinic_id
-                GROUP BY c.id, c.name, c.location
-                ORDER BY c.name
-            """)
-            clinic_stats = cursor.fetchall()
+                    COUNT(DISTINCT cl.id) as total_clinics,
+                    COUNT(DISTINCT d.id) as total_doctors,
+                    COUNT(DISTINCT p.id) as total_patients,
+                    COUNT(DISTINCT ap.id) FILTER (WHERE ap.status = 'waiting') as active_appointments
+                FROM clinics cl
+                LEFT JOIN doctors d ON cl.id = d.clinic_id AND d.status = 'active'
+                LEFT JOIN appointments ap ON d.id = ap.doctor_id
+                LEFT JOIN patients p ON ap.patient_id = p.id
+                {company_filter} AND cl.status = 'active'
+            """, params)
             
-            # --- Doctor performance ---
-            # ... (doctor performance query) ...
-            cursor.execute("""
+            overview = cursor.fetchone()
+            
+            # Get clinic breakdown
+            cursor.execute(f"""
+                SELECT 
+                    cl.id,
+                    cl.name,
+                    ct.name as city,
+                    COUNT(DISTINCT d.id) as total_doctors,
+                    COUNT(DISTINCT p.id) as total_patients,
+                    COUNT(DISTINCT ap.id) FILTER (WHERE ap.status = 'waiting') as waiting_patients
+                FROM clinics cl
+                LEFT JOIN cities ct ON cl.city_id = ct.id
+                LEFT JOIN doctors d ON cl.id = d.clinic_id AND d.status = 'active'
+                LEFT JOIN appointments ap ON d.id = ap.doctor_id
+                LEFT JOIN patients p ON ap.patient_id = p.id
+                {company_filter} AND cl.status = 'active'
+                GROUP BY cl.id, cl.name, ct.name
+                ORDER BY cl.name
+            """, params)
+            
+            clinic_breakdown = cursor.fetchall()
+            
+            # Get doctor performance
+            cursor.execute(f"""
                 SELECT 
                     d.id as doctor_id,
                     d.name,
                     u.username,
                     u.email,
-                    d.clinic_id,
-                    c.name as clinic_name,
-                    COUNT(a.id) FILTER (WHERE a.status = 'completed') as total_attended,
-                    COUNT(a.id) FILTER (WHERE a.status = 'waiting') as currently_waiting
+                    cl.name as clinic_name,
+                    ct.name as city,
+                    COUNT(ap.id) FILTER (WHERE ap.status = 'completed') as total_attended,
+                    COUNT(ap.id) FILTER (WHERE ap.status = 'waiting') as currently_waiting
                 FROM doctors d
                 JOIN users u ON d.user_id = u.id
-                JOIN clinics c ON d.clinic_id = c.id
-                LEFT JOIN appointments a ON d.id = a.doctor_id
-                WHERE d.status = 'active'
-                GROUP BY d.id, d.name, u.username, u.email, d.clinic_id, c.name
-                ORDER BY d.name
-            """)
-            doctor_stats = cursor.fetchall()
+                JOIN clinics cl ON d.clinic_id = cl.id
+                LEFT JOIN cities ct ON cl.city_id = ct.id
+                LEFT JOIN appointments ap ON d.id = ap.doctor_id
+                WHERE d.status = 'active' {"AND cl.company_id = %s" if company_id else ""}
+                GROUP BY d.id, d.name, u.username, u.email, cl.name, ct.name
+                ORDER BY cl.name, d.name
+            """, params)
             
-            # --- Average waiting time (today) ---
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            cursor.execute("""
-                SELECT AVG(EXTRACT(EPOCH FROM (ended_at - created_at))/60) as avg_minutes
-                FROM appointments
-                WHERE status = 'completed' AND ended_at >= %s
-            """, (today_start,))
-            
-            result = cursor.fetchone()
-            avg_wait_minutes = int(result['avg_minutes']) if result['avg_minutes'] else 0
+            doctor_performance = cursor.fetchall()
             
             return {
                 "success": True,
-                "overview": {
-                    "total_clinics": total_clinics,
-                    "total_doctors": total_doctors,
-                    "total_patients": total_patients,
-                    "active_appointments": active_appointments,
-                    "avg_wait_minutes": avg_wait_minutes
-                },
-                "clinic_breakdown": clinic_stats,
-                "doctor_performance": doctor_stats
+                "overview": overview,
+                "clinic_breakdown": clinic_breakdown,
+                "doctor_performance": doctor_performance
             }
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+def get_all_receptionists(db, company_id) -> Dict[str, Any]:
+    """Get all receptionists with clinic information"""
+    try:
+        with db.get_cursor() as cursor:
+            if company_id:
+                # Filter by company
+                cursor.execute("""
+                    SELECT 
+                        r.id,
+                        r.name,
+                        u.username,
+                        u.email,
+                        r.contact,
+                        cl.name as clinic_name,
+                        ct.name as city
+                    FROM receptionists r
+                    JOIN users u ON r.user_id = u.id
+                    JOIN clinics cl ON r.clinic_id = cl.id
+                    LEFT JOIN cities ct ON cl.city_id = ct.id
+                    WHERE cl.company_id = %s AND cl.status = 'active'
+                    ORDER BY cl.name, r.name
+                """, (company_id,))
+            else:
+                # All receptionists
+                cursor.execute("""
+                    SELECT 
+                        r.id,
+                        r.name,
+                        u.username,
+                        u.email,
+                        r.contact,
+                        cl.name as clinic_name,
+                        ct.name as city
+                    FROM receptionists r
+                    JOIN users u ON r.user_id = u.id
+                    JOIN clinics cl ON r.clinic_id = cl.id
+                    LEFT JOIN cities ct ON cl.city_id = ct.id
+                    ORDER BY cl.name, r.name
+                """)
+            
+            receptionists = cursor.fetchall()
+            
+            return {
+                "success": True,
+                "receptionists": receptionists
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-def get_all_receptionists(db) -> Dict[str, Any]:
-    """Retrieves all receptionist accounts."""
-    with db.get_cursor() as cursor:
-        cursor.execute("""
-            SELECT 
-                r.id, r.name, r.contact, r.clinic_id, u.username, u.email,
-                c.name as clinic_name, r.created_at
-            FROM receptionists r
-            JOIN users u ON r.user_id = u.id
-            JOIN clinics c ON r.clinic_id = c.id
-            ORDER BY r.created_at DESC
-        """)
-        receptionists = cursor.fetchall()
-    
-        return {"success": True, "receptionists": receptionists}
-
+def get_all_doctors(db, company_id) -> Dict[str, Any]:
+    try:
+        with db.get_cursor() as cursor:
+            if company_id:
+                # Filter by company
+                cursor.execute("""
+                    SELECT 
+                        d.id as doctor_id,
+                        d.name,
+                        u.username,
+                        u.email,
+                        cl.name as clinic_name,
+                        ct.name as city,
+                        COUNT(ap.id) FILTER (WHERE ap.status = 'completed') as total_attended,
+                        COUNT(ap.id) FILTER (WHERE ap.status = 'waiting') as currently_waiting
+                    FROM doctors d
+                    JOIN users u ON d.user_id = u.id
+                    JOIN clinics cl ON d.clinic_id = cl.id
+                    LEFT JOIN cities ct ON cl.city_id = ct.id
+                    LEFT JOIN appointments ap ON d.id = ap.doctor_id
+                    WHERE d.status = 'active' AND cl.company_id = %s AND cl.status = 'active'
+                    GROUP BY d.id, d.name, u.username, u.email, cl.name, ct.name
+                    ORDER BY cl.name, d.name
+                """, (company_id,))
+            else:
+                # All doctors
+                cursor.execute("""
+                    SELECT 
+                        d.id as doctor_id,
+                        d.name,
+                        u.username,
+                        u.email,
+                        cl.name as clinic_name,
+                        ct.name as city,
+                        COUNT(ap.id) FILTER (WHERE ap.status = 'completed') as total_attended,
+                        COUNT(ap.id) FILTER (WHERE ap.status = 'waiting') as currently_waiting
+                    FROM doctors d
+                    JOIN users u ON d.user_id = u.id
+                    JOIN clinics cl ON d.clinic_id = cl.id
+                    LEFT JOIN cities ct ON cl.city_id = ct.id
+                    LEFT JOIN appointments ap ON d.id = ap.doctor_id
+                    WHERE d.status = 'active'
+                    GROUP BY d.id, d.name, u.username, u.email, cl.name, ct.name
+                    ORDER BY cl.name, d.name
+                """)
+            
+            doctors = cursor.fetchall()
+            
+            return {
+                "success": True,
+                "doctors": doctors
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def get_available_doctors_for_admin(db) -> Dict[str, Any]:
     """Retrieves list of active doctors with current queue length and end time."""

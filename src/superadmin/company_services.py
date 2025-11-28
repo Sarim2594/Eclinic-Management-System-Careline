@@ -7,9 +7,9 @@ from typing import Dict, Any
 # ============================================================================
 
 def register_new_company(db, company: CompanyCreate) -> Dict[str, Any]:
-    """Registers a new company, checking for uniqueness."""
+    """Registers a new company with subscription details"""
     with db.get_cursor() as cursor:
-        # Check if email or registration number already exists
+        # Check uniqueness
         cursor.execute("""
             SELECT id FROM companies 
             WHERE email = %s OR registration_number = %s
@@ -17,17 +17,19 @@ def register_new_company(db, company: CompanyCreate) -> Dict[str, Any]:
         
         if cursor.fetchone():
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
+                status_code=400, 
                 detail="Company with this email or registration number already exists"
             )
         
-        # Insert company
+        # Insert company with new fields
         cursor.execute("""
-            INSERT INTO companies (name, email, contact, registration_number, address, status)
-            VALUES (%s, %s, %s, %s, %s, 'active')
+            INSERT INTO companies (name, email, contact, registration_number, address, 
+                                  subscription_plan, max_clinics, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'active')
             RETURNING id
         """, (company.name, company.email, company.contact, 
-              company.registration_number, company.address))
+              company.registration_number, company.address,
+              company.subscription_plan, company.max_clinics))
         
         company_id = cursor.fetchone()['id']
         
@@ -60,19 +62,32 @@ def update_company_status(db, company_id: int, status_update: CompanyStatusUpdat
         }
 
 def get_clinics_by_company(db, company_id: int) -> Dict[str, Any]:
-    """Retrieves all clinics belonging to a specific company."""
-    with db.get_cursor() as cursor:
-        cursor.execute("""
-            SELECT 
-                c.id, c.name, c.location, c.city, c.status,
-                COUNT(DISTINCT d.id) as doctor_count
-            FROM clinics c
-            LEFT JOIN doctors d ON c.id = d.clinic_id
-            WHERE c.company_id = %s
-            GROUP BY c.id
-            ORDER BY c.name
-        """, (company_id,))
-        
-        clinics = cursor.fetchall()
-        
-        return {"success": True, "clinics": clinics}
+    """Get all clinics for a company with region details"""
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    cl.id,
+                    cl.name,
+                    cl.location,
+                    ct.name as city,
+                    r.province,
+                    r.sub_region,
+                    COUNT(DISTINCT d.id) as doctor_count
+                FROM clinics cl
+                JOIN cities ct ON cl.city_id = ct.id
+                JOIN regions r ON ct.region_id = r.id
+                LEFT JOIN doctors d ON cl.id = d.clinic_id AND d.status = 'active'
+                WHERE cl.company_id = %s AND cl.status = 'active'
+                GROUP BY cl.id, cl.name, cl.location, ct.name, r.province, r.sub_region
+                ORDER BY r.province, r.sub_region, cl.name
+            """, (company_id,))
+            
+            clinics = cursor.fetchall()
+            
+            return {
+                "success": True,
+                "clinics": clinics
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

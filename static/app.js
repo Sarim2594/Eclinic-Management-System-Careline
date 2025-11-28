@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:8000/api';
+const API_URL = '/api';
 
 import * as validate from './validation_functions.js';
 import * as popup from './popup_modal.js';
@@ -57,6 +57,12 @@ window.createAdmin = superadmin.createAdmin;
 window.assignAllRegionsEdit = superadmin.assignAllRegionsEdit;
 window.updateAdminRegions = superadmin.updateAdminRegions;
 window.closeEditAdminModal = superadmin.closeEditAdminModal;
+window.viewCompanyDetails = superadmin.viewCompanyDetails || window.viewCompanyDetails;
+window.toggleCompanyStatus = superadmin.toggleCompanyStatus || window.toggleCompanyStatus;
+window.closeCompanyDetailsModal = superadmin.closeCompanyDetailsModal || window.closeCompanyDetailsModal;
+window.closeCompanyDetailsOnOutsideClick = superadmin.closeCompanyDetailsOnOutsideClick || window.closeCompanyDetailsOnOutsideClick;
+window.deleteAdmin = superadmin.deleteAdmin || window.deleteAdmin;
+window.editAdminRegions = superadmin.editAdminRegions || window.editAdminRegions;
 
 // ============================================================================
 // AUTHENTICATION
@@ -86,9 +92,15 @@ async function handleLogin(event) {
             if (nameDisplay) nameDisplay.textContent = data.name || data.username || '';
             
             loadPortal(data.role);
+            // Provide admin module with current user data so it can access company_id etc.
+            if (data.role === 'admin' && admin && typeof admin.setCurrentUser === 'function') {
+                admin.setCurrentUser(data);
+            }
             bulletins.loadBulletins().catch(() => {});
             
             notifications.startNotificationPolling();
+            // Setup outside-click handler for notifications dropdown (only once)
+            if (typeof notifications.setupNotificationCloser === 'function') notifications.setupNotificationCloser();
             if (data.role === 'doctor') {
                 doctor.startWaitingPatientsPolling();
             }
@@ -188,7 +200,13 @@ async function createClinic() {
             body: JSON.stringify({ name, location, company_id }) 
         });
         const data = await res.json();
-        // ... (rest of success/error handling) ...
+        if (data.success) { 
+            popup.showPopUp('Clinic Created', 'Clinic created successfully', 'success'); 
+            const acn = document.getElementById('admin-clinic-name'); if (acn) acn.value = '';
+            const acl = document.getElementById('admin-clinic-location'); if (acl) acl.value = '';
+            const acc = document.getElementById('admin-clinic-city'); if (acc) acc.value = '';
+        }
+        else popup.showPopUp('Creation Failed', data.detail || 'Could not create clinic', 'error');
     } catch (err) { popup.showPopUp('Error', err.message || 'Failed to create clinic', 'error'); }
 }
 
