@@ -9,43 +9,38 @@ from typing import Dict, Any
 def create_new_clinic(db, clinic: ClinicCreate) -> Dict[str, Any]:
     """Creates a new clinic with proper region validation"""
     with db.get_cursor() as cursor:
-        # 1. Verify company exists and check clinic limit
+        # 1. Verify company exists
         cursor.execute("""
-            SELECT c.max_clinics, COUNT(cl.id) as current_clinics
-            FROM companies c
-            LEFT JOIN clinics cl ON c.id = cl.company_id AND cl.status = 'active'
-            WHERE c.id = %s
-            GROUP BY c.id, c.max_clinics
+            SELECT id FROM companies WHERE id = %s
         """, (clinic.company_id,))
         
         company_data = cursor.fetchone()
         if not company_data:
             raise HTTPException(status_code=404, detail="Company not found")
         
-        if company_data['current_clinics'] >= company_data['max_clinics']:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Clinic limit reached. Maximum {company_data['max_clinics']} clinics allowed."
-            )
-        
-        # 2. Look up city_id from city name
-        cursor.execute("""
-            SELECT id FROM cities WHERE name = %s
-        """, (clinic.city_name,))
-        
-        city = cursor.fetchone()
-        if not city:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"City '{clinic.city_name}' not found in database"
-            )
+        # 2. Determine city_id from provided city_id or city_name
+        city_id = None
+        if getattr(clinic, 'city_id', None):
+            cursor.execute("SELECT id FROM cities WHERE id = %s", (clinic.city_id,))
+            c = cursor.fetchone()
+            if not c:
+                raise HTTPException(status_code=400, detail=f"City id {clinic.city_id} not found")
+            city_id = c['id']
+        elif getattr(clinic, 'city_name', None):
+            cursor.execute("SELECT id FROM cities WHERE name = %s", (clinic.city_name,))
+            c = cursor.fetchone()
+            if not c:
+                raise HTTPException(status_code=400, detail=f"City '{clinic.city_name}' not found in database")
+            city_id = c['id']
+        else:
+            raise HTTPException(status_code=400, detail="city_id or city_name is required")
         
         # 3. Insert clinic
         cursor.execute("""
             INSERT INTO clinics (company_id, name, location, city_id)
             VALUES (%s, %s, %s, %s)
             RETURNING id
-        """, (clinic.company_id, clinic.name, clinic.location, city['id']))
+        """, (clinic.company_id, clinic.name, clinic.location, city_id))
         
         clinic_id = cursor.fetchone()['id']
         

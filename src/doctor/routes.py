@@ -10,6 +10,7 @@ from src.doctor.models import DiagnosisSubmit, VitalsRecord, PastPatientsRespons
 from src.doctor.patient_services import get_waiting_patients_list, get_diagnosed_patients_list, get_patient_history
 from src.doctor.treatment_services import record_patient_vitals, submit_patient_diagnosis
 from src.doctor.status_services import set_doctor_status_inactive
+from src.doctor.unavailability_services import request_unavailability, get_doctor_unavailability_requests
 
 router = APIRouter()
 
@@ -91,3 +92,35 @@ async def set_doctor_inactive(request: Request, doctor_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f'Internal server error: {str(e)}')
+
+# ============================================================================
+# 4. UNAVAILABILITY MANAGEMENT
+# ============================================================================
+
+@router.post("/{doctor_id}/request-unavailability")
+async def request_doctor_unavailability(request: Request, doctor_id: int, data: dict):
+    """Doctor submits a request for unavailability ahead of time"""
+    try:
+        db = request.app.state.db
+        return request_unavailability(
+            db, 
+            doctor_id, 
+            data.get('start_datetime'),
+            data.get('end_datetime'),
+            data.get('reason')
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.get("/{doctor_id}/unavailability-requests")
+async def get_unavailability_requests(request: Request, doctor_id: int):
+    """Get all unavailability requests for a doctor"""
+    try:
+        db = request.app.state.db
+        return get_doctor_unavailability_requests(db, doctor_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

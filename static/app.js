@@ -29,6 +29,7 @@ window.validateVitalsInput = validate.vitalsInput;
 window.formatCNICInput = validate.formatCNICInput;
 window.showPopUp = popup.showPopUp;
 window.closePopUp = popup.closePopUp;
+window.toggleBulletinPanel = bulletins.toggleBulletinPanel;
 window.toggleNotifications = notifications.toggleNotifications;
 window.markNotificationRead = notifications.markNotificationRead;
 window.markAllAsRead = notifications.markAllAsRead;
@@ -43,8 +44,19 @@ window.confirmDiagnosis = doctor.confirmDiagnosis;
 window.closeConfirmModal = doctor.closeConfirmModal;
 window.togglePatientDetails = doctor.togglePatientDetails;
 window.viewPatientHistory = doctor.viewPatientHistory;
+window.submitUnavailabilityRequest = doctor.submitUnavailabilityRequest;
+window.loadUnavailabilityRequests = doctor.loadUnavailabilityRequests;
 window.showAdminTab = admin.showAdminTab;
+window.showStaffManagementSubTab = admin.showStaffManagementSubTab;
+window.showDoctorSubTab = admin.showDoctorSubTab;
+window.showCommunicationsSubTab = admin.showCommunicationsSubTab;
 window.searchStaff = admin.searchStaff;
+window.searchAvailableDoctors = admin.searchAvailableDoctors;
+window.loadUnavailableDoctors = admin.loadUnavailableDoctors;
+window.loadAdminUnavailabilityRequests = admin.loadAdminUnavailabilityRequests;
+window.approveUnavailabilityRequest = admin.approveUnavailabilityRequest;
+window.rejectUnavailabilityRequest = admin.rejectUnavailabilityRequest;
+window.hideDoctorOfflineRibbon = notifications.hideDoctorOfflineRibbon;
 window.showSuperAdminTab = superadmin.showSuperAdminTab;
 window.searchCompanies = superadmin.searchCompanies;
 window.searchAllCompanies = superadmin.searchAllCompanies;
@@ -133,6 +145,9 @@ async function logout() {
     doctor.setInactiveStatus(); 
     
     userState.clearUser(); 
+    
+    // Clear bulletin read state on logout so user sees badge again on next login
+    localStorage.removeItem('bulletins_read');
 
     const mainApp = document.getElementById('main-app');
     const loginPage = document.getElementById('login-page');
@@ -179,35 +194,93 @@ async function loadPortal(role) {
 // ============================================================================
 
 async function createClinic() {
+    console.log('[createClinic] Function called');
     const name = document.getElementById('admin-clinic-name') ? document.getElementById('admin-clinic-name').value.trim() : '';
     const location = document.getElementById('admin-clinic-location') ? document.getElementById('admin-clinic-location').value.trim() : '';
     
+    console.log('[createClinic] Form values:', { name, location });
+    
     // 1. Get company_id from the user state
     const adminData = userState.getUser(); 
+    console.log('[createClinic] Admin data:', adminData);
+    
     if (!adminData || !adminData.company_id) {
+        console.error('[createClinic] No company_id found');
         popup.showPopUp('Error', 'Company ID not found in Admin profile.', 'error');
         return;
     }
     const company_id = adminData.company_id; 
     
-    if (!name || !location) { popup.showPopUp('Missing Fields', 'Please fill all clinic fields', 'error'); return; }
+    if (!name || !location) { 
+        console.error('[createClinic] Missing name or location');
+        popup.showPopUp('Missing Fields', 'Please fill all clinic fields', 'error'); 
+        return; 
+    }
 
     try {
-        // 2. Include company_id in the payload
-        const res = await fetch(`${API_URL}/admin/create-clinic`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ name, location, company_id }) 
+        // 2. Include company_id and city_name in the payload
+        const cityEl = document.getElementById('admin-clinic-city');
+        const city_id = cityEl ? (cityEl.value ? parseInt(cityEl.value, 10) : null) : null;
+        console.log('[createClinic] Sending request with:', { name, location, company_id, city_id });
+
+        const res = await fetch(`${API_URL}/admin/create-clinic`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, location, company_id, city_id })
         });
         const data = await res.json();
+        console.log('[createClinic] Response:', data);
+        
         if (data.success) { 
+            console.log('[createClinic] Success, showing popup');
             popup.showPopUp('Clinic Created', 'Clinic created successfully', 'success'); 
             const acn = document.getElementById('admin-clinic-name'); if (acn) acn.value = '';
             const acl = document.getElementById('admin-clinic-location'); if (acl) acl.value = '';
-            const acc = document.getElementById('admin-clinic-city'); if (acc) acc.value = '';
+            const acc = document.getElementById('admin-clinic-city'); if (acc) acc.selectedIndex = 0;
+            // Refresh admin dashboard and clinic dropdowns so the new clinic appears immediately
+            if (typeof admin.loadAdminDashboard === 'function') admin.loadAdminDashboard().catch(() => {});
+            if (typeof admin.loadAdminClinicsDropdown === 'function') admin.loadAdminClinicsDropdown().catch(() => {});
+            // Also optimistically add the created clinic to the dashboard table and clinic selects
+            try {
+                const newClinicId = data.clinic_id;
+                const tbody = document.getElementById('admin-clinic-stats');
+                if (tbody) {
+                    const row = document.createElement('tr');
+                    row.className = 'border-b border-gray-100 hover:bg-gray-50';
+                    row.innerHTML = `
+                        <td class="py-3 px-4 font-medium">${name}</td>
+                        <td class="py-3 px-4">0</td>
+                        <td class="py-3 px-4">0</td>
+                        <td class="py-3 px-4"><span class="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">0</span></td>
+                    `;
+                    // prepend the new row
+                    if (tbody.firstChild) tbody.insertBefore(row, tbody.firstChild);
+                    else tbody.appendChild(row);
+                }
+
+                // add option to selects that list clinics
+                const clinicSelectIds = ['admin-doctor-clinic', 'admin-recep-clinic', 'admin-transfer-clinic'];
+                clinicSelectIds.forEach(id => {
+                    const sel = document.getElementById(id);
+                    if (sel) {
+                        const opt = document.createElement('option');
+                        opt.value = newClinicId;
+                        opt.textContent = name;
+                        sel.appendChild(opt);
+                    }
+                });
+            } catch (e) { console.warn('Could not optimistically insert new clinic into DOM', e); }
+            // ensure backend changes are picked up (retry dashboard refresh)
+            setTimeout(() => { if (typeof admin.loadAdminDashboard === 'function') admin.loadAdminDashboard().catch(() => {}); }, 700);
         }
-        else popup.showPopUp('Creation Failed', data.detail || 'Could not create clinic', 'error');
-    } catch (err) { popup.showPopUp('Error', err.message || 'Failed to create clinic', 'error'); }
+        else {
+            console.error('[createClinic] Response not successful:', data);
+            popup.showPopUp('Creation Failed', data.detail || 'Could not create clinic', 'error');
+        }
+    } catch (err) { 
+        console.error('[createClinic] Exception caught:', err.message);
+        popup.showPopUp('Error', err.message || 'Failed to create clinic', 'error'); 
+    }
 }
 
 async function createReceptionist() {
@@ -245,12 +318,16 @@ async function createDoctor() {
     const license = document.getElementById('admin-doctor-license') ? document.getElementById('admin-doctor-license').value.trim() : '';
     const contact = document.getElementById('admin-doctor-contact') ? document.getElementById('admin-doctor-contact').value.trim() : '';
     const clinic_id = document.getElementById('admin-doctor-clinic') ? document.getElementById('admin-doctor-clinic').value : '';
+    const specialization = document.getElementById('admin-doctor-specialization') ? parseInt(document.getElementById('admin-doctor-specialization').value) : '';
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     const startTimes = days.map(day => document.getElementById(`admin-doctor-start-time-${day}`) ? document.getElementById(`admin-doctor-start-time-${day}`).value : null);
     const endTimes = days.map(day => document.getElementById(`admin-doctor-end-time-${day}`) ? document.getElementById(`admin-doctor-end-time-${day}`).value : null);
 
     if (!name || !username || !email || !password || !license || !contact || !clinic_id) { 
         popup.showPopUp('Missing Fields', 'Please fill all doctor fields', 'error'); return; 
+    }
+    if (!specialization) {
+        popup.showPopUp('Missing Fields', 'Please select a specialization for the doctor', 'error'); return;
     }
     if (!validate.email(email)) { popup.showPopUp('Invalid Email', 'Please provide a valid email', 'error'); return; }
     for (let i = 0; i < days.length; i++) {
@@ -264,7 +341,7 @@ async function createDoctor() {
     }
 
     try {
-        const res = await fetch(`${API_URL}/admin/create-doctor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, email, password, license_number: license, contact, clinic_id, startTimes, endTimes }) });
+        const res = await fetch(`${API_URL}/admin/create-doctor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, email, password, license_number: license, contact, clinic_id, specialization, startTimes, endTimes }) });
         const data = await res.json();
         if (data.success) { 
             popup.showPopUp('Doctor Created', 'Account created successfully', 'success'); admin.loadStaffAssignments().catch(() => {}); 
@@ -275,6 +352,7 @@ async function createDoctor() {
             const adl = document.getElementById('admin-doctor-license'); if (adl) adl.value = '';
             const adc = document.getElementById('admin-doctor-contact'); if (adc) adc.value = '+92 ';
             const adcl = document.getElementById('admin-doctor-clinic'); if (adcl) adcl.value = '';
+            const ads = document.getElementById('admin-doctor-specialization'); if (ads) ads.selectedIndex = 0;
             const adst = days.map(day => document.getElementById(`admin-doctor-start-time-${day}`)); adst.forEach(el => { if (el) el.value = ''; });
             const adet = days.map(day => document.getElementById(`admin-doctor-end-time-${day}`)); adet.forEach(el => { if (el) el.value = ''; });
         }

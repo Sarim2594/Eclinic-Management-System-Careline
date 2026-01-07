@@ -11,8 +11,7 @@ class CompanyCreate(BaseModel):
     contact: str
     registration_number: str
     address: str
-    subscription_plan: str = 'basic'
-    max_clinics: int = 5
+    subscription_plan: str = 'purchase'
 
 class AdminCreate(BaseModel):
     name: str

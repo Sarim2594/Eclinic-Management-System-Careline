@@ -260,15 +260,26 @@ export function searchAllCompanies() {
 }
 
 export async function registerCompany() {
-    const name = document.getElementById('company-name').value.trim();
-    const email = document.getElementById('company-email').value.trim();
-    const contact = document.getElementById('company-contact').value.trim();
-    const regNumber = document.getElementById('company-reg-number').value.trim();
-    const address = document.getElementById('company-address').value.trim();
-    const subscription = document.getElementById('company-subscription').value;
-    const maxClinics = document.getElementById('company-max-clinics').value;
+    const nameEl = document.getElementById('company-name');
+    const emailEl = document.getElementById('company-email');
+    const contactEl = document.getElementById('company-contact');
+    const regNumberEl = document.getElementById('company-reg-number');
+    const addressEl = document.getElementById('company-address');
+    const subscriptionEl = document.getElementById('company-subscription');
 
-    if (!name || !email || !contact || !regNumber || !address || !maxClinics) {
+    if (!nameEl || !emailEl || !contactEl || !regNumberEl || !addressEl || !subscriptionEl) {
+        popup.showPopUp('Error', 'Please fill all missing fields', 'error');
+        return;
+    }
+
+    const name = nameEl.value.trim();
+    const email = emailEl.value.trim();
+    const contact = contactEl.value.trim();
+    const regNumber = regNumberEl.value.trim();
+    const address = addressEl.value.trim();
+    const subscription = subscriptionEl.value;
+
+    if (!name || !email || !contact || !regNumber || !address) {
         popup.showPopUp('Missing Fields', 'Please fill all required fields', 'error');
         return;
     }
@@ -279,7 +290,7 @@ export async function registerCompany() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name, email, contact, registration_number: regNumber,
-                address, subscription_plan: subscription, max_clinics: parseInt(maxClinics)
+                address, subscription_plan: subscription
             })
         });
 
@@ -292,8 +303,7 @@ export async function registerCompany() {
             document.getElementById('company-contact').value = '+92 ';
             document.getElementById('company-reg-number').value = '';
             document.getElementById('company-address').value = '';
-            document.getElementById('company-subscription').value = 'basic';
-            document.getElementById('company-max-clinics').value = '';
+            document.getElementById('company-subscription').value = 'Purchase';
         } else {
             popup.showPopUp('Error', data.detail || 'Failed to register company', 'error');
         }
@@ -312,10 +322,7 @@ async function loadAllAdmins() {
         const response = await fetch('/api/superadmin/admins');
         const data = await response.json();
         
-        console.log('Admins API response:', data);
-
         allAdmins = data.admins || [];
-        console.log('Admins to display:', allAdmins);
         displayAdmins(allAdmins);
         populateCompanyFilter();
     } catch (error) {
@@ -433,7 +440,7 @@ function displayRegionCheckboxes(containerId, countId, regionsGrouped) {
     let html = '';
     
     for (const [province, subRegions] of Object.entries(regionsGrouped)) {
-        const provinceId = province.replace(/\s/g, '-');
+        const provinceId = String(province).replace(/[^a-z0-9]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
         
         html += `
             <div class="mb-4 border border-gray-200 rounded-lg overflow-hidden">
@@ -482,7 +489,7 @@ function displayRegionCheckboxes(containerId, countId, regionsGrouped) {
 }
 
 window.toggleProvince = function(province, checked, containerId, countId) {
-    const provinceId = province.replace(/\s/g, '-');
+    const provinceId = String(province).replace(/[^a-z0-9]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const checkboxes = document.querySelectorAll(`#${containerId} .province-${provinceId}-${containerId}`);
     checkboxes.forEach(cb => cb.checked = checked);
     toggleSubRegion(containerId, countId);
@@ -627,11 +634,11 @@ export async function updateAdminRegions() {
 
 export function closeEditAdminModal() {
     document.getElementById('edit-admin-modal').classList.add('hidden');
-    selectedRegions = [];
+    selectedRegionIds = [];
 }
 
 export async function deleteAdmin(adminId) {
-    const confirmed = await showConfirmModal(
+    const confirmed = await popup.showConfirmModal(
         'Delete Admin',
         'Are you sure you want to delete this admin? This action cannot be undone.',
         'Delete',
@@ -901,53 +908,17 @@ async function loadCompanyClinics(companyId) {
     }
 }
 
-function showConfirmModal(title, message, confirmText, cancelText) {
-    return new Promise((resolve) => {
-        const modalHTML = `
-            <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-800 mb-4">${title}</h3>
-                        <p class="text-gray-600 mb-6">${message}</p>
-                        <div class="flex gap-3 justify-end">
-                            <button onclick="window.resolveConfirm(false)" 
-                                class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg font-medium transition-colors">
-                                ${cancelText}
-                            </button>
-                            <button onclick="window.resolveConfirm(true)" 
-                                class="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
-                                ${confirmText}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        const existing = document.getElementById('confirm-modal');
-        if (existing) existing.remove();
-        
-        document.body.insertAdjacentHTML('beforeend', modalHTML);
-        
-        window.resolveConfirm = (result) => {
-            const modal = document.getElementById('confirm-modal');
-            if (modal) modal.remove();
-            delete window.resolveConfirm;
-            resolve(result);
-        };
-    });
-}
-
 export async function toggleCompanyStatus(companyId, currentStatus) {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     const action = newStatus === 'active' ? 'activate' : 'deactivate';
     
-    // Use custom confirmation modal
-    const confirmed = await showConfirmModal(
+    // Use custom confirmation modal from popup module
+    const confirmed = await popup.showConfirmModal(
         `${action.charAt(0).toUpperCase() + action.slice(1)} Company`,
         `Are you sure you want to ${action} this company? This will affect all associated clinics, doctors, and staff.`,
-        action === 'active' ? 'Activate' : 'Deactivate',
-        'Cancel'
+        newStatus === 'active' ? 'Activate' : 'Deactivate',
+        'Cancel',
+        newStatus === 'active' ? 'warning' : 'danger'
     );
     
     if (!confirmed) return;
@@ -1102,7 +1073,7 @@ async function loadChangeRequests() {
         
         tbody.innerHTML = data.requests.map(req => {
             const requestType = req.request_type === 'password_reset' ? 'Password Reset' : 
-                              req.request_type === 'contact_change' ? 'Contact Change' : 'Regions Change';
+                              req.request_type === 'contact_change' ? 'Contact Change' : 'General Query';
             const createdDate = new Date(req.created_at).toLocaleDateString();
             
             return `
@@ -1116,11 +1087,11 @@ async function loadChangeRequests() {
                     <td class="py-3 px-4 text-sm text-gray-600">${createdDate}</td>
                     <td class="py-3 px-4">
                         <div class="flex gap-2">
-                            <button onclick="approveChangeRequest(${req.id})" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition-colors inline-flex items-center gap-1 w-8 h-8 justify-center">
-                                ${svgIcon('check-circle', 'w-4 h-4')}
+                            <button onclick="approveChangeRequest(${req.id})" class="w-10 h-10 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center font-medium transition-colors" title="Approve">
+                                ${svgIcon('check-circle', 'w-5 h-5')}
                             </button>
-                            <button onclick="rejectChangeRequest(${req.id})" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium transition-colors inline-flex items-center gap-1 w-8 h-8 justify-center">
-                                ${svgIcon('ban', 'w-4 h-4')}
+                            <button onclick="rejectChangeRequest(${req.id})" class="w-10 h-10 bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center justify-center font-medium transition-colors" title="Reject">
+                                ${svgIcon('ban', 'w-5 h-5')}
                             </button>
                         </div>
                     </td>
@@ -1138,7 +1109,8 @@ window.approveChangeRequest = async function(requestId) {
         'Approve Change Request',
         'Are you sure you want to approve this change request?',
         'Approve',
-        'Cancel'
+        'Cancel',
+        'confirmation'
     );
     
     if (!confirmed) return;
@@ -1163,27 +1135,97 @@ window.approveChangeRequest = async function(requestId) {
 };
 
 window.rejectChangeRequest = async function(requestId) {
-    const rejectReason = prompt('Enter rejection reason:', '');
-    if (rejectReason === null) return; // User cancelled
-    
-    try {
-        const response = await fetch(`/api/superadmin/change-request/${requestId}/reject`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: rejectReason })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            popup.showPopUp('Success', 'Change request rejected', 'success');
-            loadChangeRequests();
-        } else {
-            popup.showPopUp('Error', data.detail || 'Failed to reject request', 'error');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+
+    const modal = document.createElement('div');
+    modal.className = 'bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-down relative';
+
+    const iconContainer = document.createElement('div');
+    iconContainer.className = 'w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4';
+    iconContainer.innerHTML = `<svg class="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`;
+
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'text-2xl font-bold text-gray-800 mb-2 text-center';
+    titleEl.textContent = 'Reject Change Request';
+
+    const messageEl = document.createElement('p');
+    messageEl.className = 'text-gray-600 mb-4 text-center';
+    messageEl.textContent = 'Please provide a reason for rejection:';
+
+    const textareaContainer = document.createElement('div');
+    textareaContainer.className = 'mb-6';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors';
+    textarea.placeholder = 'Enter rejection reason...';
+    textarea.rows = '3';
+
+    const errorMsg = document.createElement('p');
+    errorMsg.className = 'text-red-600 text-sm mt-2 hidden';
+    errorMsg.textContent = 'This field is required';
+
+    textareaContainer.appendChild(textarea);
+    textareaContainer.appendChild(errorMsg);
+
+    textarea.addEventListener('input', () => {
+        if (textarea.value.trim()) {
+            textarea.classList.remove('border-red-500', 'border-2');
+            errorMsg.classList.add('hidden');
         }
-    } catch (error) {
-        console.error('Error rejecting request:', error);
-        popup.showPopUp('Error', 'An error occurred while rejecting the request', 'error');
-    }
+    });
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'grid grid-cols-2 gap-3';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-medium transition-colors text-center';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => { backdrop.remove(); };
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors text-center';
+    confirmBtn.textContent = 'Reject';
+    confirmBtn.onclick = async () => {
+        const reason = textarea.value.trim();
+        if (!reason) {
+            textarea.classList.add('border-red-500', 'border-2');
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+        backdrop.remove();
+        
+        try {
+            const response = await fetch(`/api/superadmin/change-request/${requestId}/reject`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: reason })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                popup.showPopUp('Success', 'Change request rejected', 'success');
+                loadChangeRequests();
+            } else {
+                popup.showPopUp('Error', data.detail || 'Failed to reject request', 'error');
+            }
+        } catch (error) {
+            console.error('Error rejecting request:', error);
+            popup.showPopUp('Error', 'An error occurred while rejecting the request', 'error');
+        }
+    };
+
+    buttonContainer.appendChild(cancelBtn);
+    buttonContainer.appendChild(confirmBtn);
+
+    modal.appendChild(iconContainer);
+    modal.appendChild(titleEl);
+    modal.appendChild(messageEl);
+    modal.appendChild(textareaContainer);
+    modal.appendChild(buttonContainer);
+    backdrop.appendChild(modal);
+
+    document.body.appendChild(backdrop);
 };
 
 // Attach to window for backward compatibility with onclick handlers

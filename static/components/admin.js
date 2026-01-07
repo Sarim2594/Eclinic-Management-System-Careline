@@ -1,6 +1,26 @@
 // Complete admin.js with all fixes
 
+import { getUser } from '../user_state.js';
+
 let currentUser = null;
+let isRequestingPasswordChange = false;
+
+// Small inline SVG helper to avoid relying on external icon fonts/CDNs
+function svgIcon(name, extraClasses = '') {
+    const base = `class="${extraClasses} inline-block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    switch (name) {
+        case 'chart-line':
+            return `<svg ${base}><line x1="12" y1="2" x2="12" y2="22"></line><path d="M17 5H9.5a1.5 1.5 0 0 0-1.5 1.5v12a1.5 1.5 0 0 0 1.5 1.5H17"></path><polyline points="6 12 4 14 2 12"></polyline></svg>`;
+        case 'users':
+            return `<svg ${base}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+        case 'stethoscope':
+            return `<svg ${base}><path d="M11 4a4 4 0 0 0-4 4v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a4 4 0 0 0-4-4"></path><circle cx="18" cy="14" r="2"></circle></svg>`;
+        case 'message-square':
+            return `<svg ${base}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+        default:
+            return `<svg ${base}><circle cx="12" cy="12" r="10"></circle></svg>`;
+    }
+}
 
 export function setCurrentUser(data) {
     currentUser = data;
@@ -10,9 +30,66 @@ export function getCurrentUser() {
     return currentUser;
 }
 
+// Render regions as compact badges with a "+N more" toggle when there are many
+function renderAdminRegions(regions, containerId = 'admin-regions-list', maxVisible = 6) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Group sub-regions by province
+    const byProvince = {};
+    regions.forEach(r => {
+        const prov = r.province || (r.full_name ? r.full_name.split('>')[0].trim() : 'Unknown');
+        const sub = r.sub_region || (r.full_name ? r.full_name.split('>')[1]?.trim() : '');
+        if (!byProvince[prov]) byProvince[prov] = new Set();
+        if (sub) byProvince[prov].add(sub);
+    });
+
+    const entries = Object.entries(byProvince).map(([prov, subsSet]) => {
+        const subs = Array.from(subsSet);
+        const text = subs.length ? `${prov} > ${subs.join(', ')}` : prov;
+        return { prov, text };
+    });
+
+    const visible = entries.slice(0, maxVisible);
+    const hidden = entries.slice(maxVisible);
+
+    visible.forEach(e => {
+        const span = document.createElement('span');
+        span.className = 'px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium';
+        span.textContent = e.text;
+        span.title = e.text;
+        container.appendChild(span);
+    });
+
+    if (hidden.length > 0) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium';
+        moreBtn.type = 'button';
+        moreBtn.textContent = `+${hidden.length} more`;
+        moreBtn.onclick = () => {
+            container.innerHTML = '';
+            entries.forEach(e => {
+                const s = document.createElement('span');
+                s.className = 'px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium';
+                s.textContent = e.text;
+                s.title = e.text;
+                container.appendChild(s);
+            });
+            const less = document.createElement('button');
+            less.className = 'px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium';
+            less.type = 'button';
+            less.textContent = 'Show less';
+            less.onclick = () => renderAdminRegions(regions, containerId, maxVisible);
+            container.appendChild(less);
+        };
+        container.appendChild(moreBtn);
+    }
+}
+
 // Updated showAdminTab with city loading
 export function showAdminTab(tab) {
-    ['dashboard', 'staff', 'clinic', 'receptionist', 'doctor', 'available-doctors', 'transfer', 'bulletin', 'change-requests'].forEach(t => {
+    ['dashboard', 'staff-management', 'doctors', 'communications'].forEach(t => {
         const btn = document.getElementById(`admin-tab-${t}`);
         if (btn) {
             btn.className = `px-4 py-3 font-medium border-b-2 ${t === tab ? 'border-primary text-primary' : 'border-transparent text-gray-600'} whitespace-nowrap`;
@@ -20,57 +97,59 @@ export function showAdminTab(tab) {
             if (t === tab && t === 'dashboard') {
                 loadAdminDashboard().catch(() => {});
             }
-            else if (t === tab && t === 'available-doctors') {
-                searchAvailableDoctors().catch(() => {});
+            else if (t === tab && t === 'doctors') {
+                showDoctorSubTab('available');
             }
-            else if (t === tab && t === 'clinic') {
-                loadCitiesDropdownForAdmin().catch(() => {});
+            else if (t === tab && t === 'staff-management') {
+                showStaffManagementSubTab('assignments');
             }
         }
     });
 
     document.getElementById('admin-dashboard-tab').classList.toggle('hidden', tab !== 'dashboard');
-    document.getElementById('admin-staff-tab').classList.toggle('hidden', tab !== 'staff');
-    document.getElementById('admin-clinic-tab').classList.toggle('hidden', tab !== 'clinic');
-    document.getElementById('admin-receptionist-tab').classList.toggle('hidden', tab !== 'receptionist');
-    document.getElementById('admin-doctor-tab').classList.toggle('hidden', tab !== 'doctor');
-    document.getElementById('admin-available-doctors-tab').classList.toggle('hidden', tab !== 'available-doctors');
-    document.getElementById('admin-transfer-tab').classList.toggle('hidden', tab !== 'transfer');
-    document.getElementById('admin-bulletin-tab').classList.toggle('hidden', tab !== 'bulletin');
-    document.getElementById('admin-change-requests-tab').classList.toggle('hidden', tab !== 'change-requests');
+    document.getElementById('admin-staff-management-tab').classList.toggle('hidden', tab !== 'staff-management');
+    document.getElementById('admin-doctors-tab').classList.toggle('hidden', tab !== 'doctors');
+    document.getElementById('admin-communications-tab').classList.toggle('hidden', tab !== 'communications');
 
-    if (['receptionist', 'doctor', 'transfer'].includes(tab)) {
-        loadAdminClinicsDropdown().catch(() => {});
-        if (tab === 'transfer') loadAdminDoctorsDropdown().catch(() => {});
+    if (tab === 'staff-management') loadStaffAssignments().catch(() => {});
+    if (tab === 'staff-management') {
+        // Preload doctor specializations and clinics so the Add Doctor form shows immediately
+        loadDoctorSpecializations().catch(() => {});
+        loadClinicsForDoctor().catch(() => {});
     }
-
-    if (tab === 'staff') loadStaffAssignments().catch(() => {});
+    if (tab === 'dashboard') {
+        // Ensure cities dropdown is loaded for clinic creation
+        loadCitiesDropdownForAdmin().catch(() => {});
+    }
 }
 
 // Load cities dropdown for clinic creation
 async function loadCitiesDropdownForAdmin() {
     try {
-        const response = await fetch('/api/cities/all');
-        const data = await response.json();
-        
         const select = document.getElementById('admin-clinic-city');
         if (!select) return;
-        
+
+        select.innerHTML = '<option value="">Loading cities...</option>';
+
+        const adminIdParam = currentUser && currentUser.admin_id ? `&admin_id=${currentUser.admin_id}` : '';
+        const response = await fetch(`/api/admin/cities?${adminIdParam}`);
+        const data = await response.json();
+
         select.innerHTML = '<option value="">Select a city...</option>';
-        
-        if (data.grouped) {
+
+        if (data && data.grouped) {
             for (const [province, subRegions] of Object.entries(data.grouped)) {
                 for (const [subRegion, cities] of Object.entries(subRegions)) {
                     const optgroup = document.createElement('optgroup');
-                    optgroup.label = `${province} → ${subRegion}`;
-                    
+                    optgroup.label = `${province} > ${subRegion}`;
+
                     cities.forEach(city => {
                         const option = document.createElement('option');
                         option.value = city.id;
                         option.textContent = city.name;
                         optgroup.appendChild(option);
                     });
-                    
+
                     select.appendChild(optgroup);
                 }
             }
@@ -92,13 +171,23 @@ export async function loadAdminDashboard() {
             return;
         }
 
-        const response = await fetch(`/api/admin/statistics?company_id=${currentUser.company_id}`);
+        const adminId = currentUser.admin_id ? `&admin_id=${currentUser.admin_id}` : '';
+        const response = await fetch(`/api/admin/statistics?company_id=${currentUser.company_id}${adminId}`);
         const data = await response.json();
 
         document.getElementById('admin-stat-clinics').textContent = (data && data.overview && data.overview.total_clinics) || '-';
         document.getElementById('admin-stat-doctors').textContent = (data && data.overview && data.overview.total_doctors) || '-';
         document.getElementById('admin-stat-patients').textContent = (data && data.overview && data.overview.total_patients) || '-';
         document.getElementById('admin-stat-queue').textContent = (data && data.overview && data.overview.active_appointments) || '-';
+
+        // Display admin's regions if available
+        const regionsDiv = document.getElementById('admin-regions-display');
+        if (regionsDiv && data.regions && data.regions.length > 0) {
+            regionsDiv.classList.remove('hidden');
+            renderAdminRegions(data.regions);
+        } else if (regionsDiv) {
+            regionsDiv.classList.add('hidden');
+        }
 
         const clinicStats = document.getElementById('admin-clinic-stats');
         if (clinicStats && data && data.clinic_breakdown) {
@@ -120,6 +209,7 @@ export async function loadAdminDashboard() {
                     <td class="py-3 px-4">${doctor.clinic_name}</td>
                     <td class="py-3 px-4">${doctor.total_attended}</td>
                     <td class="py-3 px-4"><span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">${doctor.currently_waiting}</span></td>
+                    <td class="py-3 px-4"><span class="px-3 py-1 ${doctor.missed_shifts_count > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'} rounded-full text-sm font-semibold">${doctor.missed_shifts_count || 0}</span></td>
                 </tr>
             `).join('');
         }
@@ -139,9 +229,10 @@ export async function loadStaffAssignments() {
             return;
         }
 
+        const adminId = currentUser.admin_id ? `&admin_id=${currentUser.admin_id}` : '';
         const [recepResponse, docResponse] = await Promise.all([
-            fetch(`/api/admin/receptionists?company_id=${currentUser.company_id}`),
-            fetch(`/api/admin/doctors?company_id=${currentUser.company_id}`)
+            fetch(`/api/admin/receptionists?company_id=${currentUser.company_id}${adminId}`),
+            fetch(`/api/admin/doctors?company_id=${currentUser.company_id}${adminId}`)
         ]);
 
         const recepData = await recepResponse.json();
@@ -149,6 +240,25 @@ export async function loadStaffAssignments() {
 
         allReceptionists = recepData.receptionists || [];
         allDoctors = docData.doctors || [];
+
+        // Populate specialization filter for staff management
+        try {
+            const specSelect = document.getElementById('staff-doctor-specialization-filter');
+            if (specSelect) {
+                specSelect.innerHTML = '<option value="">All specializations</option>';
+                const resp = await fetch('/api/admin/specializations');
+                if (resp.ok) {
+                    const d = await resp.json();
+                    (d.specializations || []).forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.name;
+                        specSelect.appendChild(opt);
+                    });
+                }
+                specSelect.onchange = () => searchStaff();
+            }
+        } catch (e) { console.warn('Could not load specialization filter', e); }
 
         displayStaff(allReceptionists, allDoctors);
     } catch (error) {
@@ -186,6 +296,8 @@ function displayStaff(receptionists, doctors) {
 export function searchStaff() {
     const qEl = document.getElementById('staff-search');
     const query = qEl ? qEl.value.toLowerCase() : '';
+    const specEl = document.getElementById('staff-doctor-specialization-filter');
+    const specFilter = specEl && specEl.value ? specEl.value : '';
 
     const filteredReceptionists = allReceptionists.filter(r => (
         (r.name || '').toLowerCase().includes(query) ||
@@ -194,10 +306,13 @@ export function searchStaff() {
     ));
 
     const filteredDoctors = allDoctors.filter(d => (
-        (d.name || '').toLowerCase().includes(query) ||
+        ((d.name || '').toLowerCase().includes(query) ||
         (d.username || '').toLowerCase().includes(query) ||
-        (d.clinic_name || '').toLowerCase().includes(query)
+        (d.clinic_name || '').toLowerCase().includes(query))
+        && (specFilter === '' || (d.specialization_id && d.specialization_id.toString() === specFilter))
     ));
+
+    // Render with both filters applied
 
     displayStaff(filteredReceptionists, filteredDoctors);
 }
@@ -215,6 +330,35 @@ export async function searchAvailableDoctors() {
             <td class="py-3 px-4"><span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">${doc.clinic_name}</span></td>
         </tr>
     `).join('') || '<tr><td colspan="4" class="text-center py-4 text-gray-500">No available doctors found</td></tr>';
+}
+
+export async function loadUnavailableDoctors() {
+    const docTable = document.getElementById('unavailable-doctors');
+    if (!docTable) return;
+    try {
+        const adminData = getUser();
+        const adminId = adminData && adminData.admin_id ? `?admin_id=${adminData.admin_id}` : '';
+        
+        const response = await fetch(`/api/admin/unavailable-doctors${adminId}`);
+        const data = await response.json();
+        docTable.innerHTML = (data.unavailable_doctors || []).map(doc => {
+            // availability_schedules returns start_time/end_time (TIME); display as-is
+            const startTime = doc.start_time || '-';
+            const endTime = doc.end_time || '-';
+            return `
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-3 px-4 font-medium">${doc.name}</td>
+                    <td class="py-3 px-4"><span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">${doc.clinic_name}</span></td>
+                    <td class="py-3 px-4">${startTime}</td>
+                    <td class="py-3 px-4">${endTime}</td>
+                    <td class="py-3 px-4 text-sm">${doc.reason || 'N/A'}</td>
+                </tr>
+            `;
+        }).join('') || '<tr><td colspan="5" class="text-center py-4 text-gray-500">No unavailable doctors at the moment</td></tr>';
+    } catch (error) {
+        console.error('Error loading unavailable doctors:', error);
+        docTable.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading data</td></tr>';
+    }
 }
 
 async function monitorDoctors() {
@@ -253,7 +397,8 @@ export async function loadAdminClinicsDropdown() {
             return;
         }
 
-        const response = await fetch(`/api/clinics?company_id=${currentUser.company_id}`);
+        const adminIdParam = currentUser && currentUser.admin_id ? `&admin_id=${currentUser.admin_id}` : '';
+        const response = await fetch(`/api/clinics?company_id=${currentUser.company_id}${adminIdParam}`);
         const data = await response.json();
         const selects = [
             document.getElementById('admin-doctor-clinic'),
@@ -301,6 +446,10 @@ async function loadAdminDoctorsDropdown() {
 
 // Request change functions with proper API calls
 window.requestPasswordChange = async function() {
+    // Prevent duplicate submissions
+    if (isRequestingPasswordChange) return;
+
+    const submitBtn = document.getElementById('request-password-submit');
     const newPassword = document.getElementById('request-new-password').value.trim();
     const reason = document.getElementById('request-password-reason').value.trim();
 
@@ -315,6 +464,12 @@ window.requestPasswordChange = async function() {
     }
 
     try {
+        isRequestingPasswordChange = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
+        }
+
         const response = await fetch('/api/admin/request-password-change', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -335,7 +490,13 @@ window.requestPasswordChange = async function() {
             showPopUp('Request Failed', data.detail || 'Failed to submit request', 'error');
         }
     } catch (error) {
-        showPopUp('Error', 'Failed to submit request: ' + error.message, 'error');
+        showPopUp('Error', 'Failed to submit request: ' + (error && error.message ? error.message : error), 'error');
+    } finally {
+        isRequestingPasswordChange = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        }
     }
 }
 
@@ -381,3 +542,328 @@ window.requestContactChange = async function() {
 window.openRegionsChangeRequest = function() {
     showPopUp('Feature Coming Soon', 'Region change requests will be available in a future update', 'info');
 }
+
+// ============================================================================
+// UNAVAILABILITY REQUESTS MANAGEMENT
+// ============================================================================
+
+export async function loadAdminUnavailabilityRequests() {
+    const container = document.getElementById('admin-unavailability-requests-list');
+    if (!container) return;
+
+    // show loading placeholder first
+    container.innerHTML = '<p class="text-center py-8">Loading requests...</p>';
+
+    const adminData = getUser();
+    
+    if (!adminData || !adminData.admin_id) {
+        // no admin id available — clear loading and show friendly message
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">No pending unavailability requests</p>';
+        console.error('Admin ID not found in user data');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/doctor-unavailability-requests?admin_id=${adminData.admin_id}`);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`HTTP ${response.status}: ${errorData.detail || 'Unknown error'}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.requests || data.requests.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">No pending unavailability requests</p>';
+            return;
+        }
+
+        container.innerHTML = data.requests.map(req => {
+            const startDate = new Date(req.start_datetime).toLocaleString();
+            const endDate = new Date(req.end_datetime).toLocaleString();
+
+            return `
+                <div class="border border-gray-300 rounded-lg p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                        <div>
+                            <p class="text-xs text-gray-500 uppercase font-semibold">Doctor</p>
+                            <p class="text-lg font-semibold text-gray-800">${req.doctor_name}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 uppercase font-semibold">Status</p>
+                            <span class="inline-block px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                                ⏳ Pending
+                            </span>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 uppercase font-semibold">Requested On</p>
+                            <p class="text-sm text-gray-700">${new Date(req.created_at).toLocaleDateString()}</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded p-3 mb-4 border border-gray-200">
+                        <p class="text-sm text-gray-600"><strong>From:</strong> ${startDate}</p>
+                        <p class="text-sm text-gray-600"><strong>To:</strong> ${endDate}</p>
+                        ${req.reason ? `<p class="text-sm text-gray-600 mt-2"><strong>Reason:</strong> ${req.reason}</p>` : ''}
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button onclick="approveUnavailabilityRequest(${req.id}, '${req.doctor_name}')" 
+                            class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
+                            <i class="fas fa-check mr-2"></i> Approve
+                        </button>
+                        <button onclick="rejectUnavailabilityRequest(${req.id}, '${req.doctor_name}')" 
+                            class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors">
+                            <i class="fas fa-times mr-2"></i> Reject
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading unavailability requests:', error);
+        container.innerHTML = '<p class="text-red-500 text-center py-8">Error: ' + error.message + '</p>';
+    }
+}
+
+export async function approveUnavailabilityRequest(requestId, doctorName) {
+    const adminData = getUser();
+    if (!adminData || !adminData.admin_id) {
+        console.error('Admin ID not found in user data');
+        showPopUp('Error', 'Admin ID not found', 'error');
+        return;
+    }
+
+    try {
+        const url = `/api/admin/unavailability-request/${requestId}/approve?admin_id=${adminData.admin_id}`;
+        
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('Approve error:', error);
+            showPopUp('Error', error.detail || 'Failed to approve request', 'error');
+            return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showPopUp('Success', `Approved ${doctorName}'s unavailability request`, 'success');
+            await loadAdminUnavailabilityRequests();
+        } else {
+            showPopUp('Error', data.detail || 'Failed to approve request', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error approving request:', error);
+        showPopUp('Error', 'Network error occurred: ' + error.message, 'error');
+    }
+}
+
+export async function rejectUnavailabilityRequest(requestId, doctorName) {
+    const adminData = getUser();
+    if (!adminData || !adminData.admin_id) {
+        console.error('Admin ID not found in user data');
+        showPopUp('Error', 'Admin ID not found', 'error');
+        return;
+    }
+
+    try {
+        // Use default reason since backend requires it
+        const defaultReason = 'Request rejected by admin';
+        const url = `/api/admin/unavailability-request/${requestId}/reject?admin_id=${adminData.admin_id}`;
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: defaultReason })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('Reject error:', error);
+            showPopUp('Error', error.detail || 'Failed to reject request', 'error');
+            return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showPopUp('Success', `Rejected ${doctorName}'s unavailability request`, 'success');
+            await loadAdminUnavailabilityRequests();
+        } else {
+            showPopUp('Error', data.detail || 'Failed to reject request', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error rejecting request:', error);
+        showPopUp('Error', 'Network error occurred: ' + error.message, 'error');
+    }
+}
+
+// ============================================================================
+// SUB-TAB NAVIGATION FOR CONSOLIDATED TABS
+// ============================================================================
+
+export async function showStaffManagementSubTab(subTab) {
+    ['assignments', 'clinic', 'receptionist', 'doctor'].forEach(t => {
+        const btn = document.getElementById(`staff-management-subtab-${t}`);
+        if (btn) {
+            btn.className = `px-4 py-2 rounded-lg font-medium ${t === subTab ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} transition-colors`;
+        }
+        const content = document.getElementById(`staff-management-content-${t}`);
+        if (content) {
+            content.classList.toggle('hidden', t !== subTab);
+        }
+    });
+
+    if (subTab === 'clinic') loadCitiesDropdownForAdmin().catch(() => {});
+    if (subTab === 'receptionist') loadClinicsForReceptionist().catch(() => {});
+    if (subTab === 'doctor') {
+        loadClinicsForDoctor().catch(() => {});
+        loadDoctorSpecializations().catch(() => {});
+    }
+}
+
+export async function showDoctorSubTab(subTab) {
+    ['available', 'unavailable', 'transfer', 'unavailability'].forEach(t => {
+        const btn = document.getElementById(`doctor-subtab-${t}`);
+        if (btn) {
+            btn.className = `px-4 py-2 rounded-lg font-medium ${t === subTab ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} transition-colors`;
+        }
+        const content = document.getElementById(`doctor-content-${t}`);
+        if (content) {
+            content.classList.toggle('hidden', t !== subTab);
+        }
+    });
+
+    if (subTab === 'available') searchAvailableDoctors().catch(() => {});
+    if (subTab === 'unavailable') loadUnavailableDoctors().catch(() => {});
+    if (subTab === 'transfer') loadAdminDoctorsDropdown().catch(() => {});
+    if (subTab === 'unavailability') loadAdminUnavailabilityRequests().catch(() => {});
+    if (subTab === 'doctor') loadDoctorSpecializations().catch(() => {});
+}
+
+// Populate specialization dropdown for doctor creation
+async function loadDoctorSpecializations() {
+    try {
+        const select = document.getElementById('admin-doctor-specialization');
+        if (!select) return;
+        select.innerHTML = '<option value="">Loading specializations...</option>';
+        const response = await fetch('/api/admin/specializations');
+        if (!response.ok) {
+            console.error('Failed to load specializations', response.status);
+            select.innerHTML = '<option value="">Error loading specializations</option>';
+            return;
+        }
+        const data = await response.json();
+        select.innerHTML = '<option value="">Select specialization...</option>';
+        (data.specializations || []).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            select.appendChild(opt);
+        });
+    } catch (error) {
+        console.error('Error loading specializations:', error);
+    }
+}
+
+// Communications tab sub-tabs
+export function showCommunicationsSubTab(subTab) {
+    ['bulletin', 'password', 'contact', 'query'].forEach(t => {
+        const btn = document.getElementById(`communications-subtab-${t}`);
+        if (btn) {
+            btn.className = `px-4 py-2 rounded-lg font-medium ${t === subTab ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} transition-colors`;
+        }
+        const content = document.getElementById(`communications-content-${t}`);
+        if (content) {
+            content.classList.toggle('hidden', t !== subTab);
+        }
+    });
+}
+
+// Load clinics for receptionist dropdown
+async function loadClinicsForReceptionist() {
+    try {
+        const adminData = currentUser || getUser() || {};
+        const params = [];
+        if (adminData.company_id) params.push(`company_id=${adminData.company_id}`);
+        if (adminData.admin_id) params.push(`admin_id=${adminData.admin_id}`);
+        const q = params.length ? `?${params.join('&')}` : '';
+        const response = await fetch('/api/clinics' + q);
+        const data = await response.json();
+        const select = document.getElementById('admin-recep-clinic');
+        if (!select) return;
+        select.innerHTML = '<option value="">Select clinic...</option>';
+        (data.clinics || []).forEach(clinic => {
+            const option = document.createElement('option');
+            option.value = clinic.id;
+            option.textContent = clinic.name;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading clinics for receptionist:', error);
+    }
+}
+
+// Load clinics for doctor dropdown
+async function loadClinicsForDoctor() {
+    try {
+        const adminData = currentUser || getUser() || {};
+        const params = [];
+        if (adminData.company_id) params.push(`company_id=${adminData.company_id}`);
+        if (adminData.admin_id) params.push(`admin_id=${adminData.admin_id}`);
+        const q = params.length ? `?${params.join('&')}` : '';
+        const response = await fetch('/api/clinics' + q);
+        const data = await response.json();
+        const select = document.getElementById('admin-doctor-clinic');
+        if (!select) return;
+        select.innerHTML = '<option value="">Select clinic...</option>';
+        (data.clinics || []).forEach(clinic => {
+            const option = document.createElement('option');
+            option.value = clinic.id;
+            option.textContent = clinic.name;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading clinics for doctor:', error);
+    }
+}
+
+window.submitGeneralQuery = async function() {
+    const query = document.getElementById('request-general-query').value.trim();
+
+    if (!query) {
+        showPopUp('Missing Content', 'Please enter your query or message', 'error');
+        return;
+    }
+
+    if (!currentUser || !currentUser.admin_id) {
+        showPopUp('Error', 'Admin information not found', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/admin/request-general-query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                admin_id: currentUser.admin_id,
+                query: query
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showPopUp('Query Submitted', 'Your query has been sent to SuperAdmin', 'success');
+            document.getElementById('request-general-query').value = '';
+        } else {
+            showPopUp('Request Failed', data.detail || 'Failed to submit query', 'error');
+        }
+    } catch (error) {
+        showPopUp('Error', 'Failed to submit query: ' + (error && error.message ? error.message : error), 'error');
+    }
+}
+

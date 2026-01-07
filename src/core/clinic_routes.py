@@ -7,11 +7,11 @@ from typing import Optional
 router = APIRouter()
 
 @router.get("/clinics")
-async def get_clinics_endpoint(request: Request, company_id: Optional[int] = None):
-    """Get all active clinics."""
+async def get_clinics_endpoint(request: Request, company_id: Optional[int] = None, admin_id: Optional[int] = None):
+    """Get all active clinics; optionally filter by company and admin regions."""
     try:
         db = request.app.state.db
-        return get_all_active_clinics(db, company_id)
+        return get_all_active_clinics(db, company_id, admin_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

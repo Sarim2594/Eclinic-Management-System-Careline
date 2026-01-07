@@ -28,7 +28,7 @@ export function stopWaitingPatientsPolling() {
 }
 
 export function showDoctorTab(tab) {
-    const tabs = ['waiting', 'past'];
+    const tabs = ['waiting', 'past', 'unavailability'];
     tabs.forEach(t => {
         const btn = document.getElementById(`doctor-tab-${t}`);
         if (btn) {
@@ -47,6 +47,9 @@ export function showDoctorTab(tab) {
         startWaitingPatientsPolling();
     } else if (tab === 'past') {
         loadDiagnosedPatients().catch(console.error);
+        stopWaitingPatientsPolling();
+    } else if (tab === 'unavailability') {
+        loadUnavailabilityRequests().catch(console.error);
         stopWaitingPatientsPolling();
     }
 }
@@ -589,5 +592,143 @@ export function setInactiveStatus() {
         } catch (error) {
             console.error('Error setting doctor status to inactive:', error);
         }
+    }
+}
+
+// ============================================================================
+// UNAVAILABILITY REQUEST FUNCTIONS
+// ============================================================================
+
+export async function submitUnavailabilityRequest(event) {
+    event.preventDefault();
+    
+    const doctorData = getUser();
+    if (!doctorData || !doctorData.doctor_id || doctorData.role !== 'doctor') {
+        popup.showPopUp('Error', 'Please login as a doctor to submit unavailability', 'error');
+        return;
+    }
+
+    const startDate = document.getElementById('unavail-start-date').value;
+    const endDate = document.getElementById('unavail-end-date').value;
+    const reason = document.getElementById('unavail-reason').value || 'No reason provided';
+
+    if (!startDate || !endDate) {
+        popup.showPopUp('Error', 'Please provide both start and end dates', 'error');
+        return;
+    }
+
+    // Validate that end date is after start date
+    const startDt = new Date(startDate);
+    const endDt = new Date(endDate);
+    if (endDt <= startDt) {
+        popup.showPopUp('Error', 'End date must be after start date', 'error');
+        return;
+    }
+
+    try {
+        // Normalize datetime-local values to include seconds (ISO local without timezone)
+        const normalizeLocal = (s) => {
+            if (!s) return s;
+            // input usually 'YYYY-MM-DDTHH:MM' or 'YYYY-MM-DDTHH:MM:SS'
+            if (s.length === 16) return s + ':00';
+            return s;
+        };
+
+        const payload = {
+            start_datetime: normalizeLocal(startDate),
+            end_datetime: normalizeLocal(endDate),
+            reason: reason
+        };
+
+        const response = await fetch(`/api/doctor/${doctorData.doctor_id}/request-unavailability`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            popup.showPopUp('Error', error.detail || 'Failed to submit request', 'error');
+            return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            popup.showPopUp('Success', 'Unavailability request submitted successfully!', 'success');
+            
+            // Clear form
+            document.getElementById('unavail-start-date').value = '';
+            document.getElementById('unavail-end-date').value = '';
+            document.getElementById('unavail-reason').value = '';
+
+            // Refresh requests list
+            await loadUnavailabilityRequests();
+        } else {
+            popup.showPopUp('Error', data.detail || 'Failed to submit request', 'error');
+        }
+
+    } catch (error) {
+        console.error('Error submitting unavailability request:', error);
+        popup.showPopUp('Error', 'Network error occurred: ' + error.message, 'error');
+    }
+}
+
+export async function loadUnavailabilityRequests() {
+    const doctorData = getUser();
+    if (!doctorData || !doctorData.doctor_id) return;
+
+    const container = document.getElementById('doctor-unavailability-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch(`/api/doctor/${doctorData.doctor_id}/unavailability-requests`);
+        const data = await response.json();
+
+        if (!data.requests || data.requests.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">No requests yet</p>';
+            return;
+        }
+
+        container.innerHTML = data.requests.map(req => {
+            const startDate = new Date(req.start_datetime).toLocaleString();
+            const endDate = new Date(req.end_datetime).toLocaleString();
+            
+            let statusBadge = '';
+            if (req.status === 'pending') {
+                statusBadge = '<span class="inline-block bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">⏳ Pending</span>';
+            } else if (req.status === 'approved') {
+                statusBadge = '<span class="inline-block bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">✓ Approved</span>';
+            } else if (req.status === 'rejected') {
+                statusBadge = '<span class="inline-block bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">✗ Rejected</span>';
+            }
+
+            let reasonSection = '';
+            if (req.reason) {
+                reasonSection = `<p class="text-gray-600 text-sm mt-2"><strong>Reason:</strong> ${req.reason}</p>`;
+            }
+
+            let adminCommentSection = '';
+            if (req.admin_comment) {
+                adminCommentSection = `<p class="text-gray-600 text-sm mt-2"><strong>Admin Comment:</strong> ${req.admin_comment}</p>`;
+            }
+
+            return `
+                <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <p class="text-sm text-gray-500">From: ${startDate}</p>
+                            <p class="text-sm text-gray-500">To: ${endDate}</p>
+                        </div>
+                        ${statusBadge}
+                    </div>
+                    ${reasonSection}
+                    ${adminCommentSection}
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading unavailability requests:', error);
+        container.innerHTML = '<p class="text-red-500 text-center py-8">Error loading requests</p>';
     }
 }

@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from typing import Dict, Any, List, Optional
 import traceback
+import logging
 
 def _get_admin_cities_by_id(db, admin_id: int) -> List[str]:
     """Retrieves a list of city names covered by a specific Admin's regions."""
@@ -44,9 +45,16 @@ def get_notifications(db, role: str, user_id: Optional[int] = None):
                 """)
             
             elif role == 'admin' and user_id:
-                # Include notifications targeted by region (admin_regions) OR directly addressed to this admin via recipient_id
-                # Debug: log admin notification fetch
-                print(f"[notifications] fetching for admin_id={user_id}")
+                # Include notifications targeted by region (recipient_id IS NULL) OR directly addressed to this admin via recipient_id
+                logging.debug(f"[notifications] fetching for admin_id={user_id}")
+                # Determine admin's company so we only show region-targeted notifications for clinics in this company
+                cursor.execute("SELECT company_id FROM admins WHERE id = %s", (user_id,))
+                admin_row = cursor.fetchone()
+                if not admin_row or not admin_row.get('company_id'):
+                    return {"success": True, "count": 0, "notifications": []}
+
+                company_id = admin_row['company_id']
+
                 cursor.execute("""
                     SELECT DISTINCT n.id, n.type, n.title, n.message, n.created_at, n.clinic_name
                     FROM notifications n
@@ -56,13 +64,12 @@ def get_notifications(db, role: str, user_id: Optional[int] = None):
                     LEFT JOIN admin_regions ar ON r.id = ar.region_id
                     WHERE n.recipient_type = 'admin'
                       AND n.read = FALSE
-                      AND (ar.admin_id = %s OR n.recipient_id = %s)
+                      AND ((ar.admin_id = %s AND n.recipient_id IS NULL AND cl.company_id = %s) OR n.recipient_id = %s)
                     ORDER BY n.created_at DESC
                     LIMIT 50
-                """, (user_id, user_id))
+                """, (user_id, company_id, user_id))
                 rows = cursor.fetchall()
-                print(f"[notifications] fetched {len(rows)} rows for admin_id={user_id}")
-                # return early using fetched rows
+                logging.debug(f"[notifications] fetched {len(rows)} rows for admin_id={user_id}")
                 return {
                     "success": True,
                     "count": len(rows),
@@ -103,7 +110,7 @@ def get_notifications(db, role: str, user_id: Optional[int] = None):
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc()
+        logging.exception("Error in get_notifications")
         raise HTTPException(status_code=500, detail=str(e))
 
 def mark_notification_as_read(db, notification_id: int) -> Dict[str, Any]:

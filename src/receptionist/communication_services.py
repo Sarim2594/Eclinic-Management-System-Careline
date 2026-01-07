@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from src.receptionist.models import EmailRequest
 from typing import Dict, Any, List
+import logging
 import os
 import smtplib
 from dotenv import load_dotenv
@@ -51,6 +52,5 @@ def send_diagnosis_email(request: EmailRequest) -> Dict[str, Any]:
         return {"success": True, "message": "Email sent successfully"}
 
     except Exception as e:
-        print("EMAIL ERROR:", e)
-        # Note: You might want to log the full traceback here instead of just printing.
+        logging.exception("Email delivery failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Email delivery failed: {str(e)}")

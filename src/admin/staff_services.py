@@ -77,12 +77,20 @@ def create_doctor_account(db, doctor: DoctorCreate) -> Dict[str, Any]:
         """, (doctor.username, doctor.email, password_hash))
         user_id = cursor.fetchone()['id']
         
-        # 5. Create doctor profile
+        # 5. Create doctor profile (ensure specialization id exists)
+        if not getattr(doctor, 'specialization_id', None):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Specialization is required")
+
+        # Verify specialization exists
+        cursor.execute("SELECT id FROM specializations WHERE id = %s", (doctor.specialization_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid specialization")
+
         cursor.execute("""
-            INSERT INTO doctors (user_id, clinic_id, name, license_number, contact)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO doctors (user_id, clinic_id, name, specialization_id, license_number, contact)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (user_id, doctor.clinic_id, doctor.name, doctor.license_number, doctor.contact))
+        """, (user_id, doctor.clinic_id, doctor.name, doctor.specialization_id, doctor.license_number, doctor.contact))
         doctor_id = cursor.fetchone()['id']
         
         # 6. Insert availability schedules

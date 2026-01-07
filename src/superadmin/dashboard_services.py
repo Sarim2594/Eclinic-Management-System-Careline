@@ -30,7 +30,6 @@ def get_system_dashboard_data(db) -> Dict[str, Any]:
                     c.registration_number,
                     c.address,
                     c.subscription_plan,
-                    c.max_clinics,
                     c.status,
                     c.created_at,
                     COUNT(DISTINCT a.id) as admin_count,
@@ -44,7 +43,7 @@ def get_system_dashboard_data(db) -> Dict[str, Any]:
                 LEFT JOIN appointments ap ON d.id = ap.doctor_id
                 LEFT JOIN patients p ON ap.patient_id = p.id
                 GROUP BY c.id, c.name, c.email, c.contact, c.registration_number, 
-                         c.address, c.subscription_plan, c.max_clinics, c.status, c.created_at
+                         c.address, c.subscription_plan, c.status, c.created_at
                 ORDER BY c.name
             """)
             
@@ -74,7 +73,6 @@ def get_all_companies_with_stats(db) -> Dict[str, Any]:
                     c.registration_number,
                     c.address,
                     c.subscription_plan,
-                    c.max_clinics,
                     c.status,
                     c.created_at,
                     COUNT(DISTINCT a.id) as admin_count,

@@ -49,6 +49,9 @@ async function getNotifications() {
             
             updateNotificationBadge(data.count);
             displayNotifications(data.notifications);
+            
+            // Check for doctor_offline notifications and show red ribbon
+            checkDoctorOfflineNotifications(data.notifications);
         }
     } catch (error) {
         console.error('Error loading notifications:', error);
@@ -213,5 +216,47 @@ export function stopNotificationPolling() {
     if (notificationInterval) {
         clearInterval(notificationInterval);
         notificationInterval = null;
+    }
+}
+
+// Check for doctor_offline notifications and show red ribbon
+function checkDoctorOfflineNotifications(notifications) {
+    const ribbon = document.getElementById('doctor-offline-ribbon');
+    if (!ribbon) return;
+    
+    // Find unread doctor_offline notifications
+    const offlineNotifs = notifications.filter(n => 
+        n.type === 'doctor_offline' && !n.read
+    );
+    
+    if (offlineNotifs.length > 0) {
+        // Show the most recent one
+        const latest = offlineNotifs[0];
+        const messageEl = document.getElementById('doctor-offline-message');
+        const detailsEl = document.getElementById('doctor-offline-details');
+        
+        if (messageEl) messageEl.textContent = latest.title || '🚨 URGENT: Doctor Went Offline';
+        if (detailsEl) detailsEl.textContent = latest.message || 'A doctor is offline with waiting patients. Please transfer patients immediately.';
+        
+        ribbon.classList.remove('hidden');
+    } else {
+        // Hide ribbon if no offline notifications
+        ribbon.classList.add('hidden');
+    }
+}
+
+// Dismiss ribbon (called from HTML)
+window.dismissDoctorOfflineRibbon = function() {
+    const ribbon = document.getElementById('doctor-offline-ribbon');
+    if (ribbon) {
+        ribbon.classList.add('hidden');
+    }
+}
+
+// Hide ribbon when patients are transferred (called after successful transfer)
+export function hideDoctorOfflineRibbon() {
+    const ribbon = document.getElementById('doctor-offline-ribbon');
+    if (ribbon) {
+        ribbon.classList.add('hidden');
     }
 }

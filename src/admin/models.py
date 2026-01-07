@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, time
 class ClinicCreate(BaseModel):
     name: str
     location: str
-    city_name: str
+    city_id: int | None = None
+    city_name: str | None = None
     company_id: int
     
 class ReceptionistCreate(BaseModel):
@@ -28,6 +29,7 @@ class DoctorCreate(BaseModel):
     license_number: str
     contact: str
     clinic_id: int
+    specialization_id: int
     startTimes: List[Optional[str]]
     endTimes: List[Optional[str]]
 

@@ -54,12 +54,10 @@ def approve_admin_change_request(db, request_id: int) -> Dict[str, Any]:
         elif request_type == 'contact_change':
             cursor.execute("UPDATE admins SET contact = %s WHERE id = %s", (requested_data, admin_id))
             
-        elif request_type == 'regions_change':
-            new_regions = json.loads(requested_data)
-            cursor.execute("DELETE FROM admin_regions WHERE admin_id = %s", (admin_id,))
-            if new_regions:
-                region_data = [(admin_id, region) for region in new_regions]
-                cursor.executemany("INSERT INTO admin_regions (admin_id, region) VALUES (%s, %s)", region_data)
+        elif request_type == 'general_query':
+            # For general queries, we just mark them as approved without taking any action
+            # The query text is stored in `requested_data` for reference
+            pass
         
         # 3. Mark request as approved
         cursor.execute("UPDATE admin_change_requests SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = %s", (request_id,))

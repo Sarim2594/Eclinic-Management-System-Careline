@@ -1,6 +1,7 @@
 import datetime
 import random
 from fastapi import HTTPException, status
+import logging
 from src.receptionist.models import PatientCreate
 from src.receptionist.availability_services import is_doctor_available
 from typing import Dict, Any
@@ -61,8 +62,8 @@ def register_new_patient_and_assign_doctor(db, patient: PatientCreate) -> Dict[s
                             ('admin', a['id'], 'no_doctors_available', patient.clinic_id, clinic['name'], title, message)
                         )
                         notified_admin_ids.append(a['id'])
-                    # Debug log: which admins were notified
-                    print(f"[notifications] no_doctors_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
+                        # Debug log: which admins were notified
+                        logging.debug(f"[notifications] no_doctors_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
                 else:
                     # Fallback: create a general admin-level notification without recipient_id is invalid per constraint,
                     # so insert as a superadmin notification so the platform operators still see it.
@@ -101,7 +102,7 @@ def register_new_patient_and_assign_doctor(db, patient: PatientCreate) -> Dict[s
                             ('admin', a['id'], 'no_doctors_currently_available', patient.clinic_id, clinic['name'], title, message)
                         )
                         notified_admin_ids.append(a['id'])
-                    print(f"[notifications] no_doctors_currently_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
+                        logging.debug(f"[notifications] no_doctors_currently_available inserted for admin_ids={notified_admin_ids}, clinic_id={patient.clinic_id}")
                 else:
                     cursor.execute(
                         """INSERT INTO notifications (recipient_type, type, clinic_id, clinic_name, title, message) VALUES (%s, %s, %s, %s, %s, %s)""",

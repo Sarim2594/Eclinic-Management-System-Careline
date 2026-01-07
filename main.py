@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import traceback
 import os
 from dotenv import load_dotenv
+import logging
 
 from database import Database
 
@@ -21,6 +22,7 @@ from src.admin.routes import router as admin_router
 from src.doctor.routes import router as doctor_router
 from src.receptionist.routes import router as reception_router
 from src.superadmin.routes import router as superadmin_router
+from fastapi import Request
 
 load_dotenv()
 
@@ -34,13 +36,16 @@ db = Database()
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic"""
     try:
+        # Always initialize test data on startup to ensure database has seed data.
+        # Users table will contain test credentials for manual testing.
+        logging.info("Initializing test data...")
         db.initialize_test_data()
+        logging.info("✓ Test data initialized successfully")
     except Exception as e:
-        print(f"Error during test data initialization: {e}")
-        traceback.print_exc()
-    
+        logging.exception("Error during test data initialization")
+
     yield
-    
+
     db.close()
 
 app = FastAPI(
@@ -98,6 +103,21 @@ async def well_known(path: str):
 async def source_map(path: str):
     return Response(status_code=204)
 
+
+# Debug: show DB stats from the running app's DB connection (useful to confirm server-seen counts)
+@app.get('/_debug/db-stats')
+async def _debug_db_stats(request: Request):
+    db = request.app.state.db
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS cnt FROM patients")
+            patients = cursor.fetchone().get('cnt', 0)
+            cursor.execute("SELECT COUNT(*) AS cnt FROM appointments")
+            appointments = cursor.fetchone().get('cnt', 0)
+        return { 'patients': patients, 'appointments': appointments }
+    except Exception as e:
+        return { 'error': str(e) }
+
 # ============================================================================
 # FRONTEND HTML (Unchanged)
 # ============================================================================
@@ -120,9 +140,10 @@ async def get_frontend():
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n🌐 Website: http://localhost:8000")
-    print("📚 API Docs: http://localhost:8000/docs")
-    print("\n" + "="*60 + "\n")
+    logging.basicConfig(level=logging.INFO)
+    logging.info("\n🌐 Website: http://localhost:8000")
+    logging.info("📚 API Docs: http://localhost:8000/docs")
+    logging.info("\n" + "="*60 + "\n")
     
     uvicorn.run(
         app, 

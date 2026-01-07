@@ -49,10 +49,10 @@ def get_all_geographical_regions(db) -> Dict[str, Any]:
             return {
                 "success": True,
                 "regions": regions,
-                "grouped": grouped
+                "grouped": grouped,
             }
-    
-async def get_cities_in_a_region(db, region_id: int):
+
+def get_cities_in_a_region(db, region_id: int):
     """Get all cities in a specific region"""
     try:
         with db.get_cursor() as cursor:
@@ -68,7 +68,7 @@ async def get_cities_in_a_region(db, region_id: int):
             
             return {
                 "success": True,
-                "cities": cities
+                "cities": cities,
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

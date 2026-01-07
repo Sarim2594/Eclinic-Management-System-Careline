@@ -4,6 +4,7 @@ from email.mime.multipart import MIMEMultipart
 from jinja2 import Template
 from dotenv import load_dotenv
 import os
+import logging
 import traceback
 
 load_dotenv()
@@ -41,6 +42,5 @@ def send_reminder_email(recipient_email: str, doctor_name: str, start_time: str)
         return True
 
     except Exception as e:
-        print("[ERROR DETAILS]", str(e))
-        traceback.print_exc()
+        logging.exception("Error sending reminder email")
         return False

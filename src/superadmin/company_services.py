@@ -24,12 +24,12 @@ def register_new_company(db, company: CompanyCreate) -> Dict[str, Any]:
         # Insert company with new fields
         cursor.execute("""
             INSERT INTO companies (name, email, contact, registration_number, address, 
-                                  subscription_plan, max_clinics, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'active')
+                                  subscription_plan, status)
+            VALUES (%s, %s, %s, %s, %s, %s, 'active')
             RETURNING id
         """, (company.name, company.email, company.contact, 
               company.registration_number, company.address,
-              company.subscription_plan, company.max_clinics))
+              company.subscription_plan))
         
         company_id = cursor.fetchone()['id']
         

@@ -4,10 +4,13 @@ from psycopg2 import pool
 import traceback
 import hashlib
 import datetime
+from datetime import timedelta
+import random
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 import os
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
@@ -31,8 +34,7 @@ class Database:
                 raise Exception("Failed to create connection pool")
                 
         except Exception as e:
-            print(f"❌ Database connection failed: {e}")
-            traceback.print_exc()
+            logging.exception("❌ Database connection failed")
             raise
     
     @contextmanager
@@ -55,11 +57,14 @@ class Database:
         with self.get_cursor() as cursor:
             # Drop tables in reverse order of dependencies
             cursor.execute("""
+                DROP TABLE IF EXISTS doctor_unavailability_notification CASCADE;
                 DROP TABLE IF EXISTS notifications CASCADE;
+                DROP TABLE IF EXISTS doctor_unavailability_requests CASCADE;
                 DROP TABLE IF EXISTS appointments CASCADE;
                 DROP TABLE IF EXISTS availability_schedules CASCADE;
                 DROP TABLE IF EXISTS bulletins CASCADE;
                 DROP TABLE IF EXISTS admin_regions CASCADE;
+                DROP TABLE IF EXISTS admin_change_requests CASCADE;
                 DROP TABLE IF EXISTS doctors CASCADE;
                 DROP TABLE IF EXISTS receptionists CASCADE;
                 DROP TABLE IF EXISTS admins CASCADE;
@@ -93,8 +98,7 @@ class Database:
                     contact VARCHAR(20) NOT NULL,
                     registration_number VARCHAR(100) UNIQUE NOT NULL,
                     address TEXT NOT NULL,
-                    subscription_plan VARCHAR(50) DEFAULT 'basic' CHECK (subscription_plan IN ('basic', 'standard', 'premium', 'enterprise')),
-                    max_clinics INTEGER DEFAULT 5,
+                    subscription_plan VARCHAR(50) DEFAULT 'purchase' CHECK (subscription_plan IN ('purchase', 'rental', 'per_consultation_with_doctor', 'per_consultation_without_doctor')),
                     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -194,7 +198,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS admin_change_requests (
                     id SERIAL PRIMARY KEY,
                     admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
-                    request_type VARCHAR(50) NOT NULL CHECK (request_type IN ('password_reset', 'contact_change', 'regions_change')),
+                    request_type VARCHAR(50) NOT NULL CHECK (request_type IN ('password_reset', 'contact_change', 'general_query')),
                     requested_data TEXT NOT NULL,
                     reason TEXT,
                     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
@@ -217,15 +221,26 @@ class Database:
             """)
             
             # Doctors table
+            # Specializations lookup table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS specializations (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS doctors (
                     id SERIAL PRIMARY KEY,
                     user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     clinic_id INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
                     name VARCHAR(255) NOT NULL,
+                    specialization_id INTEGER REFERENCES specializations(id) ON DELETE SET NULL,
                     license_number VARCHAR(50) UNIQUE NOT NULL,
                     contact VARCHAR(20) NOT NULL,
                     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+                    missed_shifts_count INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -239,6 +254,21 @@ class Database:
                     start_time TIME,
                     end_time TIME,
                     is_active BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Doctor Unavailability Requests table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS doctor_unavailability_requests (
+                    id SERIAL PRIMARY KEY,
+                    doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+                    start_datetime TIMESTAMP NOT NULL,
+                    end_datetime TIMESTAMP NOT NULL,
+                    reason TEXT NOT NULL,
+                    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+                    admin_comment TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -300,6 +330,21 @@ class Database:
                     )
                 )
             """)
+
+            # Doctor unavailability notification tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS doctor_unavailability_notification (
+                    id SERIAL PRIMARY KEY,
+                    doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+                    shift_date DATE NOT NULL,
+                    shift_start_time TIME NOT NULL,
+                    admin_notified BOOLEAN DEFAULT FALSE,
+                    notification_id INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(doctor_id, shift_date, shift_start_time)
+                )
+            """)
             
             # Create indexes for better performance
             cursor.execute("""
@@ -352,21 +397,36 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_type, recipient_id);
                 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
                 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_doctor_unavail_notify_doctor_date_time ON doctor_unavailability_notification(doctor_id, shift_date, shift_start_time);
+                CREATE INDEX IF NOT EXISTS idx_doctor_unavail_notify_admin_notified ON doctor_unavailability_notification(admin_notified);
+                CREATE TABLE IF NOT EXISTS doctor_unavailability_admin_notification (
+                    id SERIAL PRIMARY KEY,
+                    admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+                    doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+                    shift_date DATE NOT NULL,
+                    shift_start_time TIME NOT NULL,
+                    notification_id INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(admin_id, doctor_id, shift_date, shift_start_time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_doctor_unavail_admin_adminid ON doctor_unavailability_admin_notification(admin_id);
+                CREATE INDEX IF NOT EXISTS idx_doctor_unavail_admin_doctorid ON doctor_unavailability_admin_notification(doctor_id);
             """)
     
     def initialize_test_data(self):
-        """Initialize database with Pakistani test data using normalized structure"""
+        """Initialize database with robust, synthetic Pakistani test data"""
         
         with self.get_cursor() as cursor:
             # Clear existing data
             cursor.execute("""
-                TRUNCATE TABLE notifications, appointments, availability_schedules, 
+                TRUNCATE TABLE notifications, doctor_unavailability_admin_notification, doctor_unavailability_notification, doctor_unavailability_requests, appointments, availability_schedules, 
                        bulletins, admin_regions, doctors, receptionists, admins, 
                        superadmins, patients, clinics, cities, regions, companies, users
                 RESTART IDENTITY CASCADE
             """)
             
             # ============= REGIONS AND CITIES =============
+            # Updated to include GB/AJK for complete 5-admin coverage
             pakistan_regions_data = {
                 "Punjab": {
                     "Central Punjab": ["Lahore", "Faisalabad", "Kasur", "Okara", "Sheikhupura", "Nankana Sahib", "Chiniot", "Jhang", "Toba Tek Singh"],
@@ -393,14 +453,21 @@ class Database:
                     "Eastern Balochistan": ["Sibi", "Dera Bugti", "Kohlu"],
                     "Western Balochistan": ["Chagai", "Nushki", "Kharan"],
                     "Makran Region": ["Gwadar", "Turbat", "Kech", "Panjgur", "Lasbela"]
+                },
+                "Gilgit-Baltistan & AJK": {
+                    "Gilgit Division": ["Gilgit", "Hunza", "Skardu"],
+                    "AJK Central": ["Muzaffarabad", "Mirpur", "Rawalakot"],
+                    "Baltistan Region": ["Khaplu", "Shigar"]
                 }
             }
             
             # Insert regions and cities
             region_id_map = {}  # {(province, sub_region): region_id}
+            province_region_map = {} # {province: [region_id1, region_id2...]}
             city_id_map = {}    # {city_name: city_id}
             
             for province, sub_regions in pakistan_regions_data.items():
+                province_region_map[province] = []
                 for sub_region, cities in sub_regions.items():
                     # Insert region
                     cursor.execute("""
@@ -409,6 +476,7 @@ class Database:
                     """, (province, sub_region))
                     region_id = cursor.fetchone()['id']
                     region_id_map[(province, sub_region)] = region_id
+                    province_region_map[province].append(region_id)
                     
                     # Insert cities for this region
                     for city in cities:
@@ -419,162 +487,347 @@ class Database:
                         city_id = cursor.fetchone()['id']
                         city_id_map[city] = city_id
             
-            print(f"✓ Inserted {len(region_id_map)} regions and {len(city_id_map)} cities")
+            logging.info(f"✓ Inserted {len(region_id_map)} regions and {len(city_id_map)} cities")
             
             # ============= COMPANIES =============
             companies_data = [
-                ("Edhi Foundation", "info@edhi.pk", "+923001111000", "REG-EDH-2024-001", "Blue Area, Islamabad, Pakistan", "premium", 10, "active"),
-                ("Sehat Medical Group", "contact@sehat.pk", "+923002222000", "REG-SMG-2024-002", "Clifton Block 5, Karachi, Pakistan", "standard", 5, "active"),
-                ("E-Shifa Wellness Services", "admin@eshifa.pk", "+923003333000", "REG-SWS-2024-003", "Model Town, Lahore, Pakistan", "basic", 3, "inactive")
+                ("Edhi Foundation", "info@edhi.pk", "+923001111000", "REG-EDH-2024-001", "Blue Area, Islamabad, Pakistan", "purchase", "active"),
+                ("Sehat Medical Group", "contact@sehat.pk", "+923002222000", "REG-SMG-2024-002", "Clifton Block 5, Karachi, Pakistan", "rental", "active"),
+                ("E-Shifa Wellness Services", "admin@eshifa.pk", "+923003333000", "REG-SWS-2024-003", "Model Town, Lahore, Pakistan", "per_consultation_with_doctor", "inactive")
             ]
             
             cursor.executemany("""
-                INSERT INTO companies (name, email, contact, registration_number, address, subscription_plan, max_clinics, status) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO companies (name, email, contact, registration_number, address, subscription_plan, status) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, companies_data)
             
-            print(f"✓ Inserted {len(companies_data)} companies")
+            logging.info(f"✓ Inserted {len(companies_data)} companies")
             
-            # ============= USERS =============
+            # ============= USERS & ROLES =============
             superadmin_pass = hashlib.sha256("super123".encode()).hexdigest()
             admin_pass = hashlib.sha256("admin123".encode()).hexdigest()
             doc_pass = hashlib.sha256("doc123".encode()).hexdigest()
             recep_pass = hashlib.sha256("recep123".encode()).hexdigest()
             
-            users_data = [
-                # SuperAdmin
-                ('muhammad.yasir', 'muhammad.yasir@edhi.pk', superadmin_pass, 'superadmin'),
-                # Admins
-                ('areeb.rehman', 'areeb.rehman@edhi.pk', admin_pass, 'admin'),
-                ('junaid.ahmed', 'junaid.ahmed@sehat.pk', admin_pass, 'admin'),
-                ('sarim.khan', 'sarim.khan@edhi.pk', admin_pass, 'admin'),
-                # Doctors
-                ('ahmed.ali', 'ahmed.ali@edhi.pk', doc_pass, 'doctor'),
-                ('fatima.hassan', 'fatima.hassan@edhi.pk', doc_pass, 'doctor'),
-                ('sara.khan', 'sara.khan@sehat.pk', doc_pass, 'doctor'),
-                # Receptionists
-                ('syed.ammar', 'syed.ammar@edhi.pk', recep_pass, 'receptionist'),
-                ('zainab.malik', 'zainab.malik@sehat.pk', recep_pass, 'receptionist'),
-                ('hina.tariq', 'hina.tariq@edhi.pk', recep_pass, 'receptionist')
-            ]
+            users_to_insert = []
             
+            # --- 1. SuperAdmin (User ID 1) ---
+            users_to_insert.append(('muhammad.yasir', 'muhammad.yasir@edhi.pk', superadmin_pass, 'superadmin'))
+            
+            # --- 2. Company 1 Admins (5 Admins) (User IDs 2-6) ---
+            # Edhi Foundation: 1 Admin per Province/Area
+            # Proper names: Sarim Khan, Zainab Ali, Omar Farooq, Fatima Zahra, Hassan Askari
+            users_to_insert.append(('sarim.khan', 'sarim.khan@edhi.pk', admin_pass, 'admin'))     # ID 2: Punjab
+            users_to_insert.append(('zainab.ali', 'zainab.ali@edhi.pk', admin_pass, 'admin'))           # ID 3: Sindh
+            users_to_insert.append(('omar.farooq', 'omar.farooq@edhi.pk', admin_pass, 'admin'))         # ID 4: KP
+            users_to_insert.append(('fatima.zahra', 'fatima.zahra@edhi.pk', admin_pass, 'admin'))       # ID 5: Balochistan
+            users_to_insert.append(('hassan.askari', 'hassan.askari@edhi.pk', admin_pass, 'admin'))     # ID 6: GB/AJK
+
+            # --- 3. Company 2 Admins (3 Admins) (User IDs 7-9) ---
+            # Sehat Group: 3 Admins covering all regions via zones
+            # Proper names: Usman Tariq, Ayesha Khan, Hamza Malik
+            users_to_insert.append(('usman.tariq', 'usman.tariq@sehat.pk', admin_pass, 'admin'))        # ID 7: Punjab + KP
+            users_to_insert.append(('ayesha.khan', 'ayesha.khan@sehat.pk', admin_pass, 'admin'))        # ID 8: Sindh + Balochistan
+            users_to_insert.append(('hamza.malik', 'hamza.malik@sehat.pk', admin_pass, 'admin'))        # ID 9: GB/AJK
+
+            # Insert Users so far (Admins)
             cursor.executemany("""
                 INSERT INTO users (username, email, password, role) 
                 VALUES (%s, %s, %s, %s)
-            """, users_data)
+            """, users_to_insert)
             
-            print(f"✓ Inserted {len(users_data)} users")
+            # Insert SuperAdmin Detail
+            cursor.execute("INSERT INTO superadmins (user_id, name, contact) VALUES (1, 'Muhammad Yasir', '+923009999999')")
             
-            # ============= SUPERADMIN =============
-            cursor.execute("""
-                INSERT INTO superadmins (user_id, name, contact) 
-                VALUES (1, 'Muhammad Yasir', '+923009999999')
-            """)
+            # Insert Admin Details & Regions
+            admin_details = [
+                # Comp 1 (Edhi) Admins
+                (2, 1, 'Sarim Khan', '+923001110001'),
+                (3, 1, 'Zainab Ali', '+923001110002'),
+                (4, 1, 'Omar Farooq', '+923001110003'),
+                (5, 1, 'Fatima Zahra', '+923001110004'),
+                (6, 1, 'Hassan Askari', '+923001110005'),
+                # Comp 2 (Sehat) Admins
+                (7, 2, 'Usman Tariq', '+923002220001'),
+                (8, 2, 'Ayesha Khan', '+923002220002'),
+                (9, 2, 'Hamza Malik', '+923002220003'),
+            ]
+            cursor.executemany("INSERT INTO admins (user_id, company_id, name, contact) VALUES (%s, %s, %s, %s)", admin_details)
+
+            # --- Admin Region Assignments ---
+            admin_regions_data = []
             
-            print("✓ Inserted superadmin")
+            # Comp 1: 1 Region Each
+            # Admin 2 (Punjab) -> All Punjab subregions
+            for rid in province_region_map["Punjab"]: admin_regions_data.append((1, rid)) # Admin ID 1 corresponds to User ID 2
             
-            # ============= CLINICS (with city_id) =============
+            # Admin 3 (Sindh) -> All Sindh subregions
+            for rid in province_region_map["Sindh"]: admin_regions_data.append((2, rid))
+            
+            # Admin 4 (KP) -> All KP subregions
+            for rid in province_region_map["Khyber Pakhtunkhwa"]: admin_regions_data.append((3, rid))
+            
+            # Admin 5 (Balochistan) -> All Balochistan subregions
+            for rid in province_region_map["Balochistan"]: admin_regions_data.append((4, rid))
+            
+            # Admin 6 (Northern) -> All GB/AJK subregions
+            for rid in province_region_map["Gilgit-Baltistan & AJK"]: admin_regions_data.append((5, rid))
+
+            # Comp 2: 3 Admins covering everything
+            # Admin 7 (Sehat A) -> Punjab + KP
+            for rid in province_region_map["Punjab"] + province_region_map["Khyber Pakhtunkhwa"]: 
+                admin_regions_data.append((6, rid))
+            
+            # Admin 8 (Sehat B) -> Sindh + Balochistan
+            for rid in province_region_map["Sindh"] + province_region_map["Balochistan"]: 
+                admin_regions_data.append((7, rid))
+            
+            # Admin 9 (Sehat C) -> GB/AJK
+            for rid in province_region_map["Gilgit-Baltistan & AJK"]: 
+                admin_regions_data.append((8, rid))
+
+            cursor.executemany("INSERT INTO admin_regions (admin_id, region_id) VALUES (%s, %s)", admin_regions_data)
+            logging.info("✓ Configured Admins with complex region coverage")
+
+            # ============= CLINICS =============
+            # Expanded list of clinics to cover more regions
             clinics_data = [
-                (1, "Shifa Medical Center", "F-7, Islamabad", city_id_map["Islamabad"]),
-                (2, "Aga Khan Hospital", "Stadium Road, Karachi", city_id_map["Karachi"]),
-                (1, "Services Hospital", "Jail Road, Lahore", city_id_map["Lahore"])
+                (1, "Shifa Medical Center", "F-7, Islamabad", city_id_map["Islamabad"]), # ID 1
+                (2, "Aga Khan Hospital", "Stadium Road, Karachi", city_id_map["Karachi"]), # ID 2
+                (1, "Services Hospital", "Jail Road, Lahore", city_id_map["Lahore"]), # ID 3
+                # New Clinics
+                (1, "Edhi Center Quetta", "Airport Road, Quetta", city_id_map["Quetta"]), # ID 4
+                (1, "Edhi Peshawar Clinic", "University Road, Peshawar", city_id_map["Peshawar"]), # ID 5
+                (1, "Edhi Gilgit Hub", "Main Bazaar, Gilgit", city_id_map["Gilgit"]), # ID 6
+                (2, "Sehat Care Multan", "Bosan Road, Multan", city_id_map["Multan"]), # ID 7
+                (2, "Sehat Life Hyderabad", "Auto Bahn, Hyderabad", city_id_map["Hyderabad"]), # ID 8
             ]
             
             cursor.executemany("""
                 INSERT INTO clinics (company_id, name, location, city_id) 
                 VALUES (%s, %s, %s, %s)
             """, clinics_data)
+            logging.info(f"✓ Inserted {len(clinics_data)} clinics across the country")
+
+            # ============= DOCTORS & RECEPTIONISTS =============
+            # We need doctors for 8 clinics now.
+            # Lets add doctors. We already had users 1-9. Next is 10.
             
-            print(f"✓ Inserted {len(clinics_data)} clinics")
+            # Seed specializations lookup table and prepare doctors data
+            new_users = []
+            doctors_data = []
+
+            specs = ['General Practitioner','Pediatrics','Cardiology','Dermatology','Gynecology','Orthopedics','ENT','Neurology']
+            spec_ids = []
+            for s in specs:
+                cursor.execute("INSERT INTO specializations (name) VALUES (%s) RETURNING id", (s,))
+                spec_ids.append(cursor.fetchone()['id'])
+
+            # Helper to create doctor data using specialization ids
+            def create_doctor(idx, clinic_id, name):
+                u_name = name.lower().replace(' ', '.')
+                email = u_name + "@doc.pk"
+                new_users.append((u_name, email, doc_pass, 'doctor'))
+                # We can't know the exact user_id yet without inserting, 
+                # but since we are in a fresh transaction with known previous inserts:
+                # Previous total users = 9. So this starts at 10 + idx.
+                user_id = 9 + idx + 1 
+                # assign specialization_id cyclically for seed data
+                spec_id = spec_ids[idx % len(spec_ids)]
+                doctors_data.append((user_id, clinic_id, name, spec_id, f"PMC-{202400+idx}", f"+92300{8000000+idx}"))
+                return user_id
+
+            # Clinic 1 (Islamabad) - 3 Docs
+            create_doctor(0, 1, "Ahmed Ali")
+            create_doctor(1, 1, "Fatima Hassan")
+            create_doctor(2, 1, "Hassan Raza")
             
-            # ============= ADMINS =============
-            admins_data = [
-                (2, 1, 'Areeb Rehman', '+923001234547'),
-                (3, 2, 'Junaid Ahmed', '+923002645678'),
-                (4, 1, 'Sarim Khan', '+923003476789')
-            ]
+            # Clinic 2 (Karachi) - 3 Docs
+            create_doctor(3, 2, "Sara Khan")
+            create_doctor(4, 2, "Zahra Mirza")
+            create_doctor(5, 2, "Bilal Sheikh")
+
+            # Clinic 3 (Lahore) - 2 Docs
+            create_doctor(6, 3, "Usman Ahmed")
+            create_doctor(7, 3, "Nadia Hussain")
+
+            # Clinic 4 (Quetta) - 2 Docs
+            create_doctor(8, 4, "Jamal Khan")
+            create_doctor(9, 4, "Gul Wareen")
+
+            # Clinic 5 (Peshawar) - 2 Docs
+            create_doctor(10, 5, "Yar Muhammad")
+            create_doctor(11, 5, "Palwasha Khan")
+
+            # Clinic 6 (Gilgit) - 2 Docs
+            create_doctor(12, 6, "Ali Baig")
+            create_doctor(13, 6, "Amina Batool")
+
+            # Clinic 7 (Multan) - 2 Docs
+            create_doctor(14, 7, "Fareed Shah")
+            create_doctor(15, 7, "Zainab Bibi")
+
+            # Clinic 8 (Hyderabad) - 2 Docs
+            create_doctor(16, 8, "Rajesh Kumar")
+            create_doctor(17, 8, "Anita Mahesh")
+
+            cursor.executemany("INSERT INTO users (username, email, password, role) VALUES (%s, %s, %s, %s)", new_users)
+            cursor.executemany("INSERT INTO doctors (user_id, clinic_id, name, specialization_id, license_number, contact) VALUES (%s, %s, %s, %s, %s, %s)", doctors_data)
             
-            cursor.executemany("""
-                INSERT INTO admins (user_id, company_id, name, contact) 
-                VALUES (%s, %s, %s, %s)
-            """, admins_data)
-            
-            print(f"✓ Inserted {len(admins_data)} admins")
-            
-            # ============= ADMIN REGIONS (using region_id) =============
-            admin_regions_data = [
-                (1, region_id_map[('Punjab', 'Central Punjab')]),
-                (1, region_id_map[('Punjab', 'Potohar Region')]),
-                (2, region_id_map[('Sindh', 'Lower Sindh')]),
-                (2, region_id_map[('Sindh', 'Upper Sindh')]),
-                (3, region_id_map[('Khyber Pakhtunkhwa', 'Central KP')]),
-                (3, region_id_map[('Khyber Pakhtunkhwa', 'Northern KP')])
-            ]
-            
-            cursor.executemany("""
-                INSERT INTO admin_regions (admin_id, region_id) 
-                VALUES (%s, %s)
-            """, admin_regions_data)
-            
-            print(f"✓ Inserted {len(admin_regions_data)} admin region assignments")
-            
-            # ============= DOCTORS =============
-            doctors_data = [
-                (5, 1, 'Ahmed Ali', 'PMC-12345', '+923001234567'),
-                (6, 1, 'Fatima Hassan', 'PMC-12346', '+923002345678'),
-                (7, 2, 'Sara Khan', 'PMC-12347', '+923003456789')
-            ]
-            
-            cursor.executemany("""
-                INSERT INTO doctors (user_id, clinic_id, name, license_number, contact) 
-                VALUES (%s, %s, %s, %s, %s)
-            """, doctors_data)
-            
-            print(f"✓ Inserted {len(doctors_data)} doctors")
-            
+            logging.info(f"✓ Inserted {len(doctors_data)} doctors across all clinics")
+
             # ============= RECEPTIONISTS =============
-            receptionists_data = [
-                (8, 1, 'Syed Ammar', '+923001111111'),
-                (9, 2, 'Zainab Malik', '+923002222222'),
-                (10, 3, 'Hina Tariq', '+923003333333')
+            # We have 8 clinics. We need 1 receptionist per clinic.
+            # Users created so far: 9 (Super/Admins) + 18 (Doctors) = 27.
+            # Receptionist User IDs will start from 28.
+            
+            receptionist_users = [
+                ('kamran.akmal', 'kamran.akmal@recep.pk', recep_pass, 'receptionist'),   # Clinic 1
+                ('sania.mirza', 'sania.mirza@recep.pk', recep_pass, 'receptionist'),     # Clinic 2
+                ('shoaib.malik', 'shoaib.malik@recep.pk', recep_pass, 'receptionist'),   # Clinic 3
+                ('javed.miandad', 'javed.miandad@recep.pk', recep_pass, 'receptionist'), # Clinic 4
+                ('shahid.afridi', 'shahid.afridi@recep.pk', recep_pass, 'receptionist'), # Clinic 5
+                ('wasim.akram', 'wasim.akram@recep.pk', recep_pass, 'receptionist'),     # Clinic 6
+                ('inzamam.ulhaq', 'inzamam.ulhaq@recep.pk', recep_pass, 'receptionist'), # Clinic 7
+                ('younis.khan', 'younis.khan@recep.pk', recep_pass, 'receptionist'),     # Clinic 8
+            ]
+            
+            cursor.executemany("""
+                INSERT INTO users (username, email, password, role) 
+                VALUES (%s, %s, %s, %s)
+            """, receptionist_users)
+            
+            receptionist_details = [
+                (28, 1, 'Kamran Akmal', '+923009000001'),
+                (29, 2, 'Sania Mirza', '+923009000002'),
+                (30, 3, 'Shoaib Malik', '+923009000003'),
+                (31, 4, 'Javed Miandad', '+923009000004'),
+                (32, 5, 'Shahid Afridi', '+923009000005'),
+                (33, 6, 'Wasim Akram', '+923009000006'),
+                (34, 7, 'Inzamam Ul Haq', '+923009000007'),
+                (35, 8, 'Younis Khan', '+923009000008'),
             ]
             
             cursor.executemany("""
                 INSERT INTO receptionists (user_id, clinic_id, name, contact) 
                 VALUES (%s, %s, %s, %s)
-            """, receptionists_data)
+            """, receptionist_details)
             
-            print(f"✓ Inserted {len(receptionists_data)} receptionists")
-            
-            # ============= AVAILABILITY SCHEDULES =============
+            logging.info(f"✓ Inserted 8 receptionists (1 per clinic)")
+
+            # ============= AVAILABILITY =============
             availability_data = []
-            for day in range(1, 8):
-                availability_data.append((1, day, '09:00', '17:00'))
-            for day in range(1, 7):
-                availability_data.append((2, day, '17:00', '05:00'))
-            availability_data.append((2, 7, '17:00', '03:00'))
-            for day in range(2, 8):
-                availability_data.append((3, day, '13:45', '20:00'))
-            availability_data.append((3, 1, None, None))
+            # Assign generic 9-5 schedule to all doctors
+            # We have 18 doctors (indices 0 to 17). Their DB IDs will be 1 to 18.
+            for doc_id in range(1, 19): 
+                # Mon-Fri 9-5
+                for day in range(1, 6):
+                    availability_data.append((doc_id, day, '09:00', '17:00'))
             
             cursor.executemany("""
                 INSERT INTO availability_schedules (doctor_id, day_of_week, start_time, end_time) 
                 VALUES (%s, %s, %s, %s)
             """, availability_data)
+
+            # ============= SYNTHETIC PATIENTS & APPOINTMENTS (Existing Logic Preserved) =============
+            # ... (Patient generation code remains same as previous version but with updated city choices) ...
             
-            print(f"✓ Inserted {len(availability_data)} availability schedules")
+            first_names = ["Muhammad", "Ali", "Zain", "Omar", "Bilal", "Usman", "Hamza", "Hassan", "Ayesha", "Fatima", "Zainab", "Maryam", "Sana", "Hina", "Rabia", "Sidra", "Khadija", "Nida", "Iqra", "Sadia"]
+            last_names = ["Khan", "Ahmed", "Ali", "Hussain", "Malik", "Raza", "Iqbal", "Shah", "Bhatti", "Chaudhry", "Ansari", "Mirza", "Sheikh", "Qureshi", "Abbasi", "Jutt", "Butt", "Rehman", "Siddiqui"]
+            occupations = ["Engineer", "Teacher", "Doctor", "Driver", "Shopkeeper", "Student", "Housewife", "Lawyer", "Civil Servant", "Banker", "Artist", "Farmer"]
             
-            # ============= SAMPLE BULLETINS =============
+            patients_data = []
+            generated_cnics = set()
+            
+            for i in range(100): # Increased to 100 patients
+                fname = random.choice(first_names)
+                lname = random.choice(last_names)
+                full_name = f"{fname} {lname}"
+                age = random.randint(18, 85)
+                gender = "Female" if fname in ["Ayesha", "Fatima", "Zainab", "Maryam", "Sana", "Hina", "Rabia", "Sidra", "Khadija", "Nida", "Iqra", "Sadia"] else "Male"
+                father_spouse = f"{random.choice(first_names)} {lname}"
+                marital = random.choice(["Single", "Married"])
+                
+                while True:
+                    cnic = f"{random.randint(31101, 38403)}-{random.randint(1000000, 9999999)}-{random.randint(1,9)}"
+                    if cnic not in generated_cnics:
+                        generated_cnics.add(cnic)
+                        break
+                        
+                contact = f"+923{random.randint(10, 49)}{random.randint(1000000, 9999999)}"
+                email = f"{fname.lower()}.{lname.lower()}{random.randint(1,9999)}@example.com"
+                address = f"House {random.randint(1,999)}, Street {random.randint(1,20)}, {random.choice(list(city_id_map.keys()))}"
+                
+                patients_data.append((
+                    full_name, age, gender, father_spouse, marital, contact, email, address, cnic, random.choice(occupations), "Pakistani"
+                ))
+            
+            cursor.executemany("""
+                INSERT INTO patients (name, age, gender, father_name, marital_status, contact, email, address, cnic, occupation, nationality)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, patients_data)
+            
+            # Fetch all doctor IDs with clinic IDs to create valid appointments
+            cursor.execute("SELECT id, clinic_id FROM doctors")
+            all_doc_rows = cursor.fetchall()
+
+            cursor.execute("SELECT id FROM patients")
+            patient_ids = [row['id'] for row in cursor.fetchall()]
+
+            appointments_data = []
+            notifications_data = []
+            
+            start_date = datetime.datetime.now() - datetime.timedelta(days=30)
+            
+            # Generate 300 appointments
+            for _ in range(300):
+                pat_id = random.choice(patient_ids)
+                doc = random.choice(all_doc_rows)
+                doc_id = doc['id']
+                clinic_id = doc['clinic_id']
+                
+                days_offset = random.randint(0, 37) 
+                appt_time = start_date + datetime.timedelta(days=days_offset, hours=random.randint(9, 17), minutes=random.choice([0, 15, 30, 45]))
+                
+                # FORCE COMPLETED
+                status = 'completed'
+                completed_at = appt_time + datetime.timedelta(minutes=20)
+                
+                vitals = f'{{"bp_systolic": {random.randint(110, 140)}, "bp_diastolic": {random.randint(70, 90)}, "temperature": {random.uniform(97.5, 99.5):.1f}, "pulse": {random.randint(60, 100)}}}'
+                diagnosis = random.choice(["Acute Pharyngitis", "Seasonal Flu", "Migraine", "Gastritis", "Hypertension", "Lower Back Pain", "Vitamin D Deficiency", "Upper Respiratory Infection"])
+                prescription = random.choice(["Panadol 500mg BID", "Augmentin 625mg BD", "Risek 40mg OD", "Brufen 400mg TDS", "Sunny D Capsule Weekly"])
+
+                appointments_data.append((
+                    pat_id, doc_id, clinic_id, random.randint(100, 999), 
+                    vitals, diagnosis, prescription, f"Patient complains of {random.choice(['headache', 'fever', 'cough', 'stomach pain', 'fatigue'])}",
+                    status, appt_time, appt_time, completed_at
+                ))
+                
+                notifications_data.append((
+                    'appointment_new', 'doctor', doc_id, pat_id, doc_id, clinic_id,
+                    "New Appointment", f"New appointment scheduled."
+                ))
+
+            cursor.executemany("""
+                INSERT INTO appointments (patient_id, doctor_id, clinic_id, ticket_no, vitals, diagnosis, prescription, notes, status, created_at, started_at, ended_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, appointments_data)
+            
+            cursor.executemany("""
+                INSERT INTO notifications (type, recipient_type, recipient_id, patient_id, doctor_id, clinic_id, title, message)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, notifications_data)
+            
+            # ============= BULLETINS =============
             cursor.execute("""
                 INSERT INTO bulletins (company_id, title, message) 
                 VALUES 
-                    (1, 'Dengue Fever Alert', '⚠️ Increased dengue cases in urban areas. Use mosquito repellent and eliminate standing water.'),
-                    (2, 'New COVID-19 Guidelines', '📋 Updated protocols for patient screening. All staff must follow new safety measures.'),
-                    (1, 'Staff Training Session', '📚 Mandatory training on new equipment next Monday at 9 AM. Attendance is required.')
+                    (1, 'Dengue Fever Alert', '⚠️ Increased dengue cases in urban areas.'),
+                    (2, 'New COVID-19 Guidelines', '📋 Updated protocols for patient screening.'),
+                    (1, 'Expansion Notice', '🎉 We have opened new clinics in Quetta and Peshawar!')
             """)
             
-            print("✓ Inserted sample bulletins")
-            print("\n✅ Test data initialization complete!")
+            logging.info("\n✅ Test data initialization complete with SCATTERED CLINICS & REGIONAL ADMINS!")
     
     def close(self):
         """Close all database connections"""
