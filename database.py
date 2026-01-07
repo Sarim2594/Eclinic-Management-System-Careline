@@ -620,8 +620,15 @@ class Database:
             specs = ['General Practitioner','Pediatrics','Cardiology','Dermatology','Gynecology','Orthopedics','ENT','Neurology']
             spec_ids = []
             for s in specs:
-                cursor.execute("INSERT INTO specializations (name) VALUES (%s) RETURNING id", (s,))
-                spec_ids.append(cursor.fetchone()['id'])
+                # Insert if not exists; then fetch id (idempotent seed)
+                cursor.execute("INSERT INTO specializations (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (s,))
+                cursor.execute("SELECT id FROM specializations WHERE name = %s", (s,))
+                row = cursor.fetchone()
+                if row:
+                    spec_ids.append(row['id'])
+                else:
+                    # Fallback: should not happen, but raise to surface issues
+                    raise Exception(f"Failed to seed specialization: {s}")
 
             # Helper to create doctor data using specialization ids
             def create_doctor(idx, clinic_id, name):

@@ -34,33 +34,83 @@
         .notification-item:hover {
             background-color: #f9fafb;
         }
+        @keyframes gradientShift {
+            0% {
+            background-position: 0% 50%;
+            }
+            50% {
+            background-position: 100% 50%;
+            }
+            100% {
+            background-position: 0% 50%;
+            }
+        }
+        .animated-gradient {
+            background: linear-gradient(
+            135deg,
+            #fff7ed,
+            #fde2e4,
+            #f9a8d4,
+            #f472b6
+            );
+            background-size: 300% 300%;
+            animation: gradientShift 12s ease infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
     <!-- Login Page -->
-    <div id="login-page" class="min-h-screen flex items-center justify-center px-4" style="background-image: url('/templates/Login_background.png'); background-size: cover; background-position: center; background-repeat: no-repeat;">
-        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in">
-            <div class="text-center mb-8">
-                <img src="https://thecareline.org/wp-content/uploads/2025/10/CARELINE-1-HEARTBEAT-LOGO-01.png" alt="Careline Heartbeat Logo"/>
-            </div>
-            
-            <div id="login-message" class="hidden mb-4 p-3 rounded-lg"></div>
-            
-            <form onsubmit="handleLogin(event)" class="space-y-6">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Username or Email</label>
-                    <input type="text" id="username" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Enter username or email">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                    <input type="password" id="password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Enter password">
-                </div>
-                <button type="submit" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-lg transition-colors">
-                    Login
-                </button>
-            </form>
-        </div>
+<div
+  id="login-page"
+  class="min-h-screen flex items-center justify-center px-4 animated-gradient"
+>
+  <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in">
+    <div class="text-center mb-8">
+      <img
+        src="https://thecareline.org/wp-content/uploads/2025/10/CARELINE-1-HEARTBEAT-LOGO-01.png"
+        alt="Careline Heartbeat Logo"
+      />
     </div>
+
+    <div id="login-message" class="hidden mb-4 p-3 rounded-lg"></div>
+
+    <form onsubmit="handleLogin(event)" class="space-y-6">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Username or Email
+        </label>
+        <input
+          type="text"
+          id="username"
+          required
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+          placeholder="Enter username or email"
+        />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Password
+        </label>
+        <input
+          type="password"
+          id="password"
+          required
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+          placeholder="Enter password"
+        />
+      </div>
+
+      <button
+        type="submit"
+        class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-lg transition-colors"
+      >
+        Login
+      </button>
+    </form>
+  </div>
+</div>
+
 
     <!-- Main Application (Hidden by default) -->
     <div id="main-app" class="hidden">
