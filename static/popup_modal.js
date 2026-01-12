@@ -45,14 +45,18 @@ function _showModal(modal) {
     modal.classList.remove('hidden');
 }
 
-export function showModal({ title = '', message = '', type = 'info', mode = 'notify', confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
+export function showModal({ title = '', message = '', messageHtml = false, type = 'info', mode = 'notify', confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
     const els = _getElements();
     // ensure modals stack on top of other elements when opened
     if (typeof window._popupZIndexCounter === 'undefined') window._popupZIndexCounter = 1000;
     
     if (els.modal && els.titleEl && els.messageEl) {
         els.titleEl.textContent = title;
-        els.messageEl.textContent = message;
+        if (messageHtml) {
+            els.messageEl.innerHTML = message;
+        } else {
+            els.messageEl.textContent = message;
+        }
         _setIcon(els.icon, type);
 
         const bc = _ensureButtonContainer(els.modal);
@@ -114,8 +118,8 @@ export function showModal({ title = '', message = '', type = 'info', mode = 'not
 
 }
 
-export function showPopUp(title, message, type) {
-    return showModal({ title, message, type, mode: 'notify' });
+export function showPopUp(title, message, type, messageHtml = false) {
+    return showModal({ title, message, type, mode: 'notify', messageHtml });
 }
 
 export function closePopUp() {

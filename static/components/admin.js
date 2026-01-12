@@ -288,8 +288,60 @@ function displayStaff(receptionists, doctors) {
                 <td class="py-3 px-4">${doc.username}</td>
                 <td class="py-3 px-4">${doc.email}</td>
                 <td class="py-3 px-4"><span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">${doc.clinic_name}</span></td>
+                <td class="py-3 px-4">
+                    <button type="button" onclick="viewDoctorSchedule(${doc.doctor_id}, '${encodeURIComponent(doc.name || '')}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">View Schedule</button>
+                </td>
             </tr>
-        `).join('') || '<tr><td colspan="4" class="text-center py-4 text-gray-500">No doctors found</td></tr>';
+        `).join('') || '<tr><td colspan="5" class="text-center py-4 text-gray-500">No doctors found</td></tr>';
+    }
+}
+
+// Fetch and display a doctor's weekly schedule in the popup modal
+window.viewDoctorSchedule = async function(doctorId, encodedName) {
+    const name = decodeURIComponent(encodedName || '');
+    try {
+        const resp = await fetch(`/api/admin/doctor-schedule?doctor_id=${doctorId}`);
+        if (!resp.ok) {
+            const txt = await resp.text();
+            return showPopUp('Error', `Failed to load schedule: ${txt}`, 'error');
+        }
+        const data = await resp.json();
+        const schedule = (data && data.schedule) || [];
+
+        if (!schedule.length) {
+            return showPopUp(`${name} — Schedule`, 'No schedule found for this doctor', 'info');
+        }
+
+        // Build an HTML table for the schedule
+        const rows = schedule.map(s => {
+            const start = s.start_time || '-';
+            const end = s.end_time || '-';
+            const status = s.is_active ? '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">Active</span>' : '<span class="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">Inactive</span>';
+            return `<tr class="border-b"><td class="py-2 px-3">${s.day_name}</td><td class="py-2 px-3">${start}</td><td class="py-2 px-3">${end}</td><td class="py-2 px-3">${status}</td></tr>`;
+        }).join('');
+
+        const table = `
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="border-b-2">
+                            <th class="py-2 px-3">Day</th>
+                            <th class="py-2 px-3">Start</th>
+                            <th class="py-2 px-3">End</th>
+                            <th class="py-2 px-3">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        showPopUp(`${name} — Schedule`, table, 'info', true);
+    } catch (err) {
+        console.error('Error fetching doctor schedule', err);
+        showPopUp('Error', 'Network error while loading schedule', 'error');
     }
 }
 

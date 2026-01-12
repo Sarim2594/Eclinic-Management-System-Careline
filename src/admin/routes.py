@@ -7,7 +7,7 @@ from src.admin.models import ClinicCreate, ReceptionistCreate, DoctorCreate, Doc
 from src.admin.request_models import PasswordChangeRequest, ContactChangeRequest, GeneralQueryRequest
 
 from src.admin.report_services import get_system_statistics, get_all_receptionists, get_available_doctors_for_admin, get_unavailable_doctors_for_admin, get_all_doctors
-from src.admin.report_services import get_cities_for_admin, get_all_specializations
+from src.admin.report_services import get_cities_for_admin, get_all_specializations, get_doctor_schedule
 from src.admin.staff_services import create_receptionist_account, create_doctor_account
 from src.admin.clinic_services import create_new_clinic, transfer_doctor_to_clinic
 from src.admin.bulletin_services import post_new_bulletin, deactivate_bulletin
@@ -232,6 +232,17 @@ async def get_cities(request: Request, admin_id: Optional[int] = None):
     try:
         db = request.app.state.db
         return get_cities_for_admin(db, admin_id)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/doctor-schedule")
+async def doctor_schedule(request: Request, doctor_id: int):
+    """Return a doctor's availability schedule entries."""
+    try:
+        db = request.app.state.db
+        return get_doctor_schedule(db, doctor_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

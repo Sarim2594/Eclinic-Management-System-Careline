@@ -356,6 +356,35 @@ def get_available_doctors_for_admin(db) -> Dict[str, Any]:
     
         return {"success": True, "available_doctors": doctors}
 
+def get_doctor_schedule(db, doctor_id: int) -> Dict[str, Any]:
+    """Return availability schedule entries for a doctor ordered by day_of_week."""
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT day_of_week, start_time, end_time, is_active
+                FROM availability_schedules
+                WHERE doctor_id = %s
+                ORDER BY day_of_week ASC
+            """, (doctor_id,))
+            rows = cursor.fetchall() or []
+
+            # Map ISO day numbers (1=Mon .. 7=Sun) to names
+            day_names = {1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'}
+            schedule = []
+            for r in rows:
+                dow = r.get('day_of_week')
+                schedule.append({
+                    'day_of_week': int(dow) if dow is not None else None,
+                    'day_name': day_names.get(int(dow), str(dow)) if dow is not None else '',
+                    'start_time': r.get('start_time'),
+                    'end_time': r.get('end_time'),
+                    'is_active': bool(r.get('is_active'))
+                })
+
+            return {"success": True, "schedule": schedule}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 def get_unavailable_doctors_for_admin(db, admin_id: int = None) -> Dict[str, Any]:
     """List doctors whose scheduled shift started but are inactive."""
