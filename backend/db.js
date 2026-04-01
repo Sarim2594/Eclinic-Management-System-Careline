@@ -6,13 +6,22 @@ require('dotenv').config();
 // Replaces: database.py Database class connection_pool logic
 // ============================================================================
 
+// const pool = new Pool({
+//   host: process.env.DB_HOST,
+//   port: process.env.DB_PORT,
+//   database: process.env.DB_NAME,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   max: 20,        // max connections in pool (was 20 in psycopg2)
+//   min: 1,
+//   idleTimeoutMillis: 30000,
+//   connectionTimeoutMillis: 2000,
+// });
+
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  max: 20,        // max connections in pool (was 20 in psycopg2)
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 20,
   min: 1,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
