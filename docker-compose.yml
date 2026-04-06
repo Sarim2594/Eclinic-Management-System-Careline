@@ -33,9 +33,10 @@ services:
 
   frontend:
     build: ./frontend
+    restart: always
     container_name: careline-frontend
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       - backend
     networks:
