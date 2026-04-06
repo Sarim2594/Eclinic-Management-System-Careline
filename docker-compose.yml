@@ -2,17 +2,14 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:15
     container_name: careline-db
     environment:
       POSTGRES_DB: careline
       POSTGRES_USER: neondb_owner
-      POSTGRES_PASSWORD: careline_pass
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./careline_dump.sql:/docker-entrypoint-initdb.d/careline_dump.sql
-    ports:
-      - "5432:5432"
     networks:
       - careline-network
 
