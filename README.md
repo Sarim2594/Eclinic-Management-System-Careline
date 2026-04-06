@@ -2,6 +2,8 @@
 
 ## Quick Start
 
+### Local Development
+
 ### 1. Configure database — edit `backend/.env`:
 ```
 DB_HOST=localhost
@@ -23,6 +25,58 @@ Runs on **http://localhost:5000**
 cd frontend && npm install && npm start
 ```
 Runs on **http://localhost:3000**
+
+## Docker Deployment
+
+### Prerequisites
+- Docker and Docker Compose installed on your VPS
+
+### Deployment Steps
+
+1. **Clone the repository** on your VPS:
+```bash
+git clone <your-repo-url>
+cd careline-management-system
+```
+
+2. **Build and start the containers**:
+```bash
+docker-compose up -d --build
+```
+
+3. **Check if services are running**:
+```bash
+docker-compose ps
+```
+
+4. **View logs** (if needed):
+```bash
+docker-compose logs -f
+```
+
+### Access the Application
+- Frontend: http://your-vps-ip
+- Backend API: http://your-vps-ip:5000
+- Database: Accessible internally on port 5432
+
+### Environment Variables
+The docker-compose.yml includes default database credentials:
+- Database: careline
+- User: careline_user
+- Password: careline_pass
+
+For production, consider using Docker secrets or environment files.
+
+### Stopping the Application
+```bash
+docker-compose down
+```
+
+### Updating the Application
+```bash
+git pull
+docker-compose up -d --build
+```
 
 ## Test Credentials
 | Role | Username | Password |

@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { login } from '../api';
 
-// Restores: animated-gradient bg, Careline logo, red primary theme
-// Matches: templates/index.html login section exactly
 
 export default function Login() {
   const { login: setUser } = useAuth();
@@ -45,7 +43,7 @@ export default function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Username or Email
@@ -53,6 +51,7 @@ export default function Login() {
             <input
               type="text"
               required
+              autoComplete="off"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
               placeholder="Enter username or email"
               value={form.username_or_email}
@@ -67,6 +66,7 @@ export default function Login() {
             <input
               type="password"
               required
+              autoComplete="new-password"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
               placeholder="Enter password"
               value={form.password}

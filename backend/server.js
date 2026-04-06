@@ -71,7 +71,7 @@ app.use((err, req, res, next) => {
 // START SERVER
 // ============================================================================
 const PORT = process.env.APP_PORT || 5000;
-const HOST = process.env.APP_HOST || 'localhost';
+const HOST = process.env.APP_HOST || '0.0.0.0';
 // Run late-doctor check every 10 minutes
 setInterval(checkAndSendLateReminders, 10 * 60 * 1000);
 // Also run once on startup (after 30 seconds to let DB settle)

@@ -18,14 +18,23 @@ require('dotenv').config();
 //   connectionTimeoutMillis: 2000,
 // });
 
-const pool = new Pool({
+const poolConfig = {
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
   max: 20,
   min: 1,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
-});
+};
+
+// For local or internal Docker Postgres we don’t use SSL by default.
+// For managed DB URLs (Neon, etc.) include sslmode=require in DATABASE_URL etc.
+if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('sslmode=require')) {
+  poolConfig.ssl = false;
+} else {
+  poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
