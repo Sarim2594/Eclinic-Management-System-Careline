@@ -1,734 +1,1230 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useEffect, useState } from 'react';
 import {
-  getAdminStatistics, getAdminDoctors, getAdminReceptionists,
-  getUnavailableDoctors, createDoctor, createReceptionist, createClinic,
-  getClinics, getAdminCities, getSpecializations, postBulletin,
-  getBulletinsByAdmin, deleteBulletin, getUnavailabilityRequests,
-  approveUnavailability, rejectUnavailability, monitorDoctors,
-  getDoctorSchedule, updateDoctorAvailability, transferDoctor,
-  requestPasswordChange, requestContactChange, requestGeneralQuery,
-  getAvailableDoctors, getAdminClinicBreakdown,
+  approveUnavailability,
+  createClinic,
+  createDoctor,
+  createReceptionist,
+  deleteBulletin,
+  getAdminAppointments,
+  getAdminCities,
+  getAdminClinicBreakdown,
+  getAdminComplaints,
+  getAdminDoctors,
+  getAdminReports,
+  getAdminReceptionists,
+  getAdminStatistics,
+  getBulletinsByAdmin,
+  getClinics,
+  getDoctorRegionChangeRequests,
+  getSpecializations,
+  getUnavailabilityRequests,
+  postBulletin,
+  rejectUnavailability,
+  reviewDoctorRegionChangeRequest,
+  updateClinic,
+  updateComplaintStatus,
+  updateDoctorProfile,
+  updateDoctorStatus,
+  updateReceptionistProfile,
+  updateReceptionistStatus,
 } from '../api';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import ConfirmDialog from '../components/ConfirmDialog';
+import InlineErrors from '../components/InlineErrors';
+import {
+  isValidEmail,
+  isValidPhone,
+  sanitizeEmailInput,
+  sanitizePhoneInput,
+} from '../utils/formValidation';
+import { buildTableState, nextSort } from '../utils/table';
 
-// Restores: exact structure from templates/admin.html
-// Tabs: Dashboard | Staff Management | Doctors | Communications
+const WEEKDAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+const createOperatingHours = () => WEEKDAY_LABELS.reduce((accumulator, day) => {
+  accumulator[day] = { open: '', close: '' };
+  return accumulator;
+}, {});
+
+const EMPTY_DOCTOR = {
+  name: '',
+  username: '',
+  email: '',
+  password: '',
+  contact: '',
+  clinic_id: '',
+  license_number: '',
+  specialization_id: '',
+  startTimes: Array(7).fill(''),
+  endTimes: Array(7).fill(''),
+};
+
+const EMPTY_RECEPTIONIST = {
+  name: '',
+  username: '',
+  email: '',
+  password: '',
+  contact: '',
+  clinic_id: '',
+};
+
+const EMPTY_CLINIC = {
+  name: '',
+  location: '',
+  city_id: '',
+  status: 'active',
+  operating_hours: createOperatingHours(),
+};
+
+const LIVE_REFRESH_MS = 5000;
 
 export default function Admin() {
   const { user } = useAuth();
+  const { pushToast } = useToast();
   const { admin_id, company_id } = user;
 
-  const [activeTab, setActiveTab]         = useState('dashboard');
-  const [staffSubTab, setStaffSubTab]     = useState('assignments');
-  const [doctorSubTab, setDoctorSubTab]   = useState('available');
-  const [commsSubTab, setCommsSubTab]     = useState('bulletin');
-
-  // Data
-  const [stats, setStats]               = useState({});
-  const [clinicStats, setClinicStats]   = useState([]);
-  const [doctorStats, setDoctorStats]   = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [stats, setStats] = useState({});
+  const [clinics, setClinics] = useState([]);
+  const [clinicBreakdown, setClinicBreakdown] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [receptionists, setReceptionists] = useState([]);
-  const [doctors, setDoctors]           = useState([]);
-  const [filteredReceps, setFilteredReceps] = useState([]);
-  const [filteredDoctors, setFilteredDoctors] = useState([]);
-  const [availDoctors, setAvailDoctors] = useState([]);
-  const [unavailDoctors, setUnavailDoctors] = useState([]);
-  const [unavailReqs, setUnavailReqs]   = useState([]);
-  const [clinics, setClinics]           = useState([]);
-  const [cities, setCities]             = useState([]);
-  const [specs, setSpecs]               = useState([]);
-  const [regions, setRegions]           = useState([]);
-  const [msg, setMsg]                   = useState({ text: '', ok: true });
+  const [appointments, setAppointments] = useState([]);
+  const [appointmentStatus, setAppointmentStatus] = useState('all');
+  const [complaints, setComplaints] = useState([]);
+  const [complaintStatus, setComplaintStatus] = useState('all');
+  const [reports, setReports] = useState({ performance: [], appointment_summary: [], complaint_summary: [] });
+  const [bulletinForm, setBulletinForm] = useState({ title: '', message: '' });
+  const [bulletins, setBulletins] = useState([]);
+  const [unavailabilityRequests, setUnavailabilityRequests] = useState([]);
+  const [regionChangeRequests, setRegionChangeRequests] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [specializations, setSpecializations] = useState([]);
+  const [doctorForm, setDoctorForm] = useState(EMPTY_DOCTOR);
+  const [doctorErrors, setDoctorErrors] = useState({});
+  const [doctorEditor, setDoctorEditor] = useState(null);
+  const [doctorFormOpen, setDoctorFormOpen] = useState(false);
+  const [receptionistForm, setReceptionistForm] = useState(EMPTY_RECEPTIONIST);
+  const [receptionistErrors, setReceptionistErrors] = useState({});
+  const [receptionistEditor, setReceptionistEditor] = useState(null);
+  const [receptionistFormOpen, setReceptionistFormOpen] = useState(false);
+  const [clinicForm, setClinicForm] = useState(EMPTY_CLINIC);
+  const [clinicErrors, setClinicErrors] = useState({});
+  const [clinicEditor, setClinicEditor] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
+  const [doctorTable, setDoctorTable] = useState({ query: '', page: 1 });
+  const [receptionistTable, setReceptionistTable] = useState({ query: '', page: 1 });
+  const [clinicTable, setClinicTable] = useState({ query: '', sortKey: 'name', sortDirection: 'asc', page: 1 });
+  const [reportPerformanceTable, setReportPerformanceTable] = useState({ query: '', sortKey: 'name', sortDirection: 'asc', page: 1 });
+  const [reportAppointmentTable, setReportAppointmentTable] = useState({ query: '', page: 1 });
+  const [reportComplaintTable, setReportComplaintTable] = useState({ query: '', page: 1 });
 
-  useEffect(() => { loadDashboard(); }, []);
+  useEffect(() => {
+    loadBaseData();
+  }, []);
 
-  const showMsg = (text, ok = true) => {
-    setMsg({ text, ok });
-    setTimeout(() => setMsg({ text: '', ok: true }), 5000);
-  };
+  useEffect(() => {
+    if (activeTab === 'appointments') loadAppointments(appointmentStatus);
+    if (activeTab === 'operations') {
+      loadUnavailabilityQueue();
+      loadRegionChangeQueue();
+    }
+    if (activeTab === 'complaints') loadComplaints(complaintStatus);
+    if (activeTab === 'communications') loadBulletins();
+  }, [activeTab]);
 
-  const loadDashboard = async () => {
-    try {
-      const [st, docs, receps, cl, breakdown, ct, sp] = await Promise.all([
-        getAdminStatistics({ company_id, admin_id }),
-        getAdminDoctors({ company_id, admin_id }),
-        getAdminReceptionists({ company_id, admin_id }),
-        getClinics({ company_id, admin_id }),
-        getAdminClinicBreakdown({ company_id, admin_id }),  // NEW
-        getAdminCities(admin_id),
-        getSpecializations(),
-      ]);
-      const docList   = docs.doctors        || [];
-      const recepList = receps.receptionists || [];
-      setDoctors(docList);        setFilteredDoctors(docList);
-      setReceptionists(recepList); setFilteredReceps(recepList);
-      setClinics(cl.clinics || []);
-      setClinicStats(breakdown.clinics || []);   // use breakdown for the table
-      setCities(ct.cities || []);
-      setSpecs(sp.specializations || []);
-  
-      setStats({
-        clinics:    st.total_clinics,
-        doctors:    st.total_doctors,
-        patients:   st.total_patients,
-        queue:      st.active_queue,
+  useEffect(() => {
+    const refreshPortal = async () => {
+      await loadBaseData();
+
+      if (activeTab === 'appointments') {
+        await loadAppointments(appointmentStatus);
+      }
+      if (activeTab === 'operations') {
+        await Promise.all([loadUnavailabilityQueue(), loadRegionChangeQueue()]);
+      }
+      if (activeTab === 'complaints') {
+        await loadComplaints(complaintStatus);
+      }
+      if (activeTab === 'communications') {
+        await loadBulletins();
+      }
+    };
+
+    const interval = setInterval(() => {
+      refreshPortal().catch((error) => {
+        console.error('Failed to refresh admin portal', error);
       });
-      setDoctorStats(docList);
-    } catch (e) { console.error(e); }
+    }, LIVE_REFRESH_MS);
+
+    return () => clearInterval(interval);
+  }, [activeTab, appointmentStatus, complaintStatus, admin_id, company_id]);
+
+  const loadBaseData = async () => {
+    const [statsRes, doctorRes, receptionistRes, clinicRes, breakdownRes, cityRes, specializationRes, reportRes] = await Promise.all([
+      getAdminStatistics({ company_id, admin_id }),
+      getAdminDoctors({ company_id, admin_id }),
+      getAdminReceptionists({ company_id, admin_id }),
+      getClinics({ company_id, admin_id }),
+      getAdminClinicBreakdown({ company_id, admin_id }),
+      getAdminCities(admin_id),
+      getSpecializations(),
+      getAdminReports(),
+    ]);
+
+    setStats({
+      clinics: statsRes.total_clinics,
+      doctors: statsRes.total_doctors,
+      patients: statsRes.total_patients,
+      queue: statsRes.active_queue,
+    });
+    setDoctors(doctorRes.doctors || []);
+    setReceptionists(receptionistRes.receptionists || []);
+    setClinics(clinicRes.clinics || []);
+    setClinicBreakdown(breakdownRes.clinics || []);
+    setCities(cityRes.cities || []);
+    setSpecializations(specializationRes.specializations || []);
+    setReports({
+      performance: reportRes.performance || [],
+      appointment_summary: reportRes.appointment_summary || [],
+      complaint_summary: reportRes.complaint_summary || [],
+    });
   };
 
-  const handleTab = async (tab) => {
-    setActiveTab(tab);
-    if (tab === 'staff-management') { setStaffSubTab('assignments'); }
-    if (tab === 'doctors') { setDoctorSubTab('available'); loadAvailDoctors(); }
-    if (tab === 'dashboard') loadDashboard();
+  const loadAppointments = async (status) => {
+    const data = await getAdminAppointments({ admin_id, company_id, status });
+    setAppointments(data.appointments || []);
   };
 
-  const loadAvailDoctors = async () => {
-    const data = await getAvailableDoctors();
-    setAvailDoctors(data.doctors || []);
+  const loadComplaints = async (status) => {
+    const data = await getAdminComplaints(admin_id, status);
+    setComplaints(data.complaints || []);
   };
 
-  const loadUnavailDoctors = async () => {
-    const data = await getUnavailableDoctors(admin_id);
-    setUnavailDoctors(data.doctors || []);
+  const loadBulletins = async () => {
+    const data = await getBulletinsByAdmin(admin_id);
+    setBulletins(data.bulletins || []);
   };
 
-  const loadUnavailReqs = async () => {
+  const loadUnavailabilityQueue = async () => {
     const data = await getUnavailabilityRequests(admin_id);
-    setUnavailReqs(data.requests || []);
+    setUnavailabilityRequests(data.requests || []);
   };
 
-  const handleDoctorSubTab = (sub) => {
-    setDoctorSubTab(sub);
-    if (sub === 'available') loadAvailDoctors();
-    if (sub === 'unavailable') loadUnavailDoctors();
-    if (sub === 'unavailability') loadUnavailReqs();
+  const loadRegionChangeQueue = async () => {
+    const data = await getDoctorRegionChangeRequests(admin_id);
+    setRegionChangeRequests(data.requests || []);
   };
 
-  const searchStaff = (query) => {
-    const q = (query || '').toLowerCase();
-    setFilteredDoctors(doctors.filter(d =>
-      !q || d.name?.toLowerCase().includes(q) || d.clinic_name?.toLowerCase().includes(q)
-    ));
-    setFilteredReceps(receptionists.filter(r =>
-      !q || r.name?.toLowerCase().includes(q) || r.clinic_name?.toLowerCase().includes(q)
-    ));
+  const validateDoctorForm = () => {
+    const errors = {};
+    if (!doctorForm.name.trim()) errors.name = 'Doctor name is required.';
+    if (!doctorForm.username.trim()) errors.username = 'Username is required.';
+    if (!doctorEditor && !doctorForm.password.trim()) errors.password = 'Password is required.';
+    if (!doctorForm.email.trim()) errors.email = 'Email is required.';
+    else if (!isValidEmail(doctorForm.email)) errors.email = 'Enter a valid email address.';
+    if (!doctorForm.contact.trim()) errors.contact = 'Contact number is required.';
+    else if (!isValidPhone(doctorForm.contact)) errors.contact = 'Use an 11-digit mobile number like 03001234567.';
+    if (!doctorForm.clinic_id) errors.clinic_id = 'Clinic selection is required.';
+    if (!doctorForm.license_number.trim()) errors.license_number = 'License number is required.';
+    doctorForm.startTimes.forEach((startTime, index) => {
+      const endTime = doctorForm.endTimes[index];
+      if ((startTime && !endTime) || (!startTime && endTime)) {
+        errors[`availability_${index}`] = `${WEEKDAY_LABELS[index]} needs both a start and end time, or both left blank.`;
+      }
+    });
+    setDoctorErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
-  // Sub-tab pill button
-  const SubBtn = ({ id, current, onClick, label }) => (
-    <button
-      onClick={() => onClick(id)}
-      className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-        current === id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-      }`}
-    >{label}</button>
-  );
+  const validateReceptionistForm = () => {
+    const errors = {};
+    if (!receptionistForm.name.trim()) errors.name = 'Receptionist name is required.';
+    if (!receptionistForm.username.trim()) errors.username = 'Username is required.';
+    if (!receptionistEditor && !receptionistForm.password.trim()) errors.password = 'Password is required.';
+    if (!receptionistForm.email.trim()) errors.email = 'Email is required.';
+    else if (!isValidEmail(receptionistForm.email)) errors.email = 'Enter a valid email address.';
+    if (!receptionistForm.contact.trim()) errors.contact = 'Contact number is required.';
+    else if (!isValidPhone(receptionistForm.contact)) errors.contact = 'Use an 11-digit mobile number like 03001234567.';
+    if (!receptionistForm.clinic_id) errors.clinic_id = 'Clinic selection is required.';
+    setReceptionistErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
-  // Main tab button
-  const TabBtn = ({ id, icon, label }) => (
-    <button
-      onClick={() => handleTab(id)}
-      id={`admin-tab-${id}`}
-      className={`px-4 py-3 font-medium border-b-2 whitespace-nowrap ${
-        activeTab === id ? 'border-primary text-primary' : 'border-transparent text-gray-600'
-      }`}
-    >
-      <i className={`${icon} mr-2`}></i>{label}
-    </button>
-  );
+  const resetDoctorFormState = () => {
+    setDoctorEditor(null);
+    setDoctorForm(EMPTY_DOCTOR);
+    setDoctorErrors({});
+    setDoctorFormOpen(false);
+  };
+
+  const resetReceptionistFormState = () => {
+    setReceptionistEditor(null);
+    setReceptionistForm(EMPTY_RECEPTIONIST);
+    setReceptionistErrors({});
+    setReceptionistFormOpen(false);
+  };
+
+  const validateClinicForm = () => {
+    const errors = {};
+    if (!clinicForm.name.trim()) errors.name = 'Clinic name is required.';
+    if (!clinicForm.location.trim()) errors.location = 'Clinic location is required.';
+    if (!clinicForm.city_id) errors.city_id = 'City selection is required.';
+    WEEKDAY_LABELS.forEach((day) => {
+      const dayHours = clinicForm.operating_hours?.[day] || { open: '', close: '' };
+      if ((dayHours.open && !dayHours.close) || (!dayHours.open && dayHours.close)) {
+        errors[`operating_hours_${day}`] = `${day} needs both an opening and closing time, or both left blank.`;
+      }
+    });
+    setClinicErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleDoctorSubmit = async () => {
+    if (!validateDoctorForm()) return;
+
+    try {
+      if (doctorEditor) {
+        await updateDoctorProfile(doctorEditor.id, {
+          ...doctorForm,
+          clinic_id: Number(doctorForm.clinic_id),
+          specialization_id: doctorForm.specialization_id ? Number(doctorForm.specialization_id) : null,
+        });
+        pushToast({ title: 'Doctor updated', message: `${doctorForm.name} was updated successfully.` });
+      } else {
+        await createDoctor({
+          ...doctorForm,
+          clinic_id: Number(doctorForm.clinic_id),
+          specialization_id: doctorForm.specialization_id ? Number(doctorForm.specialization_id) : null,
+          startTimes: doctorForm.startTimes,
+          endTimes: doctorForm.endTimes,
+        });
+        pushToast({ title: 'Doctor created', message: `${doctorForm.name} was added successfully.` });
+      }
+      setDoctorForm(EMPTY_DOCTOR);
+      setDoctorEditor(null);
+      setDoctorErrors({});
+      setDoctorFormOpen(false);
+      await loadBaseData();
+      setActiveTab('staff');
+    } catch (error) {
+      pushToast({ title: 'Doctor action failed', message: error.response?.data?.detail || 'Please review the doctor details.', tone: 'error' });
+    }
+  };
+
+  const handleReceptionistSubmit = async () => {
+    if (!validateReceptionistForm()) return;
+
+    try {
+      if (receptionistEditor) {
+        await updateReceptionistProfile(receptionistEditor.id, {
+          ...receptionistForm,
+          clinic_id: Number(receptionistForm.clinic_id),
+        });
+        pushToast({ title: 'Receptionist updated', message: `${receptionistForm.name} was updated successfully.` });
+      } else {
+        await createReceptionist({
+          ...receptionistForm,
+          clinic_id: Number(receptionistForm.clinic_id),
+        });
+        pushToast({ title: 'Receptionist created', message: `${receptionistForm.name} was added successfully.` });
+      }
+      setReceptionistForm(EMPTY_RECEPTIONIST);
+      setReceptionistErrors({});
+      setReceptionistEditor(null);
+      setReceptionistFormOpen(false);
+      await loadBaseData();
+      setActiveTab('staff');
+    } catch (error) {
+      pushToast({ title: 'Receptionist action failed', message: error.response?.data?.detail || 'Please review the receptionist details.', tone: 'error' });
+    }
+  };
+
+  const handleClinicSubmit = async () => {
+    if (!validateClinicForm()) return;
+
+    try {
+      if (clinicEditor) {
+        await updateClinic(clinicEditor.id, {
+          ...clinicForm,
+          city_id: Number(clinicForm.city_id),
+        });
+        pushToast({ title: 'Clinic updated', message: `${clinicForm.name} was updated successfully.` });
+      } else {
+        await createClinic({
+          company_id,
+          ...clinicForm,
+          city_id: Number(clinicForm.city_id),
+        });
+        pushToast({ title: 'Clinic created', message: `${clinicForm.name} was added successfully.` });
+      }
+      setClinicForm({ ...EMPTY_CLINIC, operating_hours: createOperatingHours() });
+      setClinicEditor(null);
+      setClinicErrors({});
+      await loadBaseData();
+      setActiveTab('dashboard');
+    } catch (error) {
+      pushToast({ title: 'Clinic action failed', message: error.response?.data?.detail || 'Please review the clinic details.', tone: 'error' });
+    }
+  };
+
+  const doctorRows = buildTableState(doctors, {
+    ...doctorTable,
+    pageSize: 5,
+    filterFn: (doctor, query) => {
+      const value = query.toLowerCase();
+      return (
+        doctor.name?.toLowerCase().includes(value) ||
+        doctor.username?.toLowerCase().includes(value) ||
+        doctor.clinic_name?.toLowerCase().includes(value)
+      );
+    },
+  });
+
+  const receptionistRows = buildTableState(receptionists, {
+    ...receptionistTable,
+    pageSize: 5,
+    filterFn: (receptionist, query) => {
+      const value = query.toLowerCase();
+      return (
+        receptionist.name?.toLowerCase().includes(value) ||
+        receptionist.username?.toLowerCase().includes(value) ||
+        receptionist.clinic_name?.toLowerCase().includes(value)
+      );
+    },
+  });
+
+  const clinicRows = buildTableState(clinicBreakdown, {
+    ...clinicTable,
+    pageSize: 5,
+    filterFn: (clinic, query) => {
+      const value = query.toLowerCase();
+      return (
+        clinic.name?.toLowerCase().includes(value) ||
+        clinic.city_name?.toLowerCase().includes(value) ||
+        clinic.province?.toLowerCase().includes(value)
+      );
+    },
+  });
+
+  const reportPerformanceRows = buildTableState(reports.performance, {
+    ...reportPerformanceTable,
+    pageSize: 5,
+    filterFn: (item, query) => item.clinic_name?.toLowerCase().includes(query.toLowerCase()) || item.name?.toLowerCase().includes(query.toLowerCase()),
+  });
+
+  const reportAppointmentRows = buildTableState(reports.appointment_summary, {
+    ...reportAppointmentTable,
+    pageSize: 6,
+    filterFn: (item, query) => item.clinic_name?.toLowerCase().includes(query.toLowerCase()) || item.status?.toLowerCase().includes(query.toLowerCase()),
+  });
+
+  const reportComplaintRows = buildTableState(reports.complaint_summary, {
+    ...reportComplaintTable,
+    pageSize: 6,
+    filterFn: (item, query) => item.clinic_name?.toLowerCase().includes(query.toLowerCase()) || item.status?.toLowerCase().includes(query.toLowerCase()),
+  });
 
   return (
-    <div>
-      {/* Regions Display */}
-      {regions.length > 0 && (
-        <div className="mb-6">
-          <div className="bg-white rounded-lg shadow p-4 border border-gray-100">
-            <div className="flex items-center mb-3">
-              <div className="w-10 h-10 flex items-center justify-center bg-blue-50 rounded-full mr-3">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2C8 2 5 5 5 9c0 6 7 13 7 13s7-7 7-13c0-4-3-7-7-7z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5"></path>
-                  <circle cx="12" cy="9" r="2.5" fill="currentColor"></circle>
-                </svg>
-              </div>
-              <h4 className="text-md font-semibold text-gray-800">Your Regions</h4>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {regions.map(r => (
-                <span key={r.region_id} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
-                  {r.province} &gt; {r.sub_region}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Tabs */}
-      <div className="flex gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
-        <TabBtn id="dashboard"         icon="fas fa-chart-line"  label="Dashboard" />
-        <TabBtn id="staff-management"  icon="fas fa-users"       label="Staff Management" />
-        <TabBtn id="doctors"           icon="fas fa-stethoscope" label="Doctors" />
-        <TabBtn id="communications"    icon="fas fa-envelope"    label="Communications" />
+    <div className="space-y-6">
+      <div className="flex gap-3 overflow-x-auto border-b border-gray-200 pb-1">
+        {[
+          ['dashboard', 'fa-solid fa-chart-pie', 'Dashboard'],
+          ['staff', 'fa-solid fa-user-doctor', 'Staff'],
+          ['clinics', 'fa-solid fa-hospital', clinicEditor ? 'Edit Clinic' : 'Clinic Settings'],
+          ['appointments', 'fa-solid fa-calendar-check', 'Appointments'],
+          ['operations', 'fa-solid fa-stethoscope', 'Doctor Reviews'],
+          ['complaints', 'fa-solid fa-life-ring', 'Complaints'],
+          ['communications', 'fa-solid fa-bullhorn', 'Communications'],
+        ].map(([id, icon, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === id ? 'border-primary text-primary' : 'border-transparent text-gray-600'}`}
+            onClick={() => setActiveTab(id)}
+          >
+            <span className="inline-flex items-center gap-2">
+              <i className={`${icon} w-4 text-center`} aria-hidden="true" />
+              <span>{label}</span>
+            </span>
+          </button>
+        ))}
       </div>
 
-      {msg.text && (
-        <div className={`mb-6 p-4 rounded-lg ${msg.ok ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
-          {msg.text}
-        </div>
-      )}
-
-      {/* ═══ DASHBOARD TAB ═══ */}
-      {activeTab === 'dashboard' && (
-        <div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <StatCard color="from-primary to-primary-dark" icon="fas fa-hospital"      label="Total Clinics"   value={stats.clinics} />
-            <StatCard color="from-green-500 to-green-600"  icon="fas fa-user-md"       label="Total Doctors"   value={stats.doctors} />
-            <StatCard color="from-blue-500 to-blue-600"    icon="fas fa-users"         label="Total Patients"  value={stats.patients} />
-            <StatCard color="from-orange-500 to-orange-600" icon="fas fa-calendar-check" label="Active Queue" value={stats.queue} />
+      {activeTab === 'dashboard' ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Total Clinics" value={stats.clinics} color="from-rose-500 to-rose-600" />
+            <StatCard label="Total Doctors" value={stats.doctors} color="from-blue-500 to-blue-600" />
+            <StatCard label="Total Patients" value={stats.patients} color="from-emerald-500 to-emerald-600" />
+            <StatCard label="Active Queue" value={stats.queue} color="from-amber-500 to-amber-600" />
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">Clinic Breakdown</h3>
+          <Panel title="Clinic Breakdown" actions={(
+            <input type="text" value={clinicTable.query} onChange={(event) => setClinicTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search clinics" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+          )}>
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead><tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-3 px-4">Clinic</th>
-                  <th className="text-left py-3 px-4">Doctors</th>
-                  <th className="text-left py-3 px-4">Patients</th>
-                  <th className="text-left py-3 px-4">Waiting</th>
-                </tr></thead>
-                <tbody id="admin-clinic-stats">
-                  {clinicStats.map(c => (
-                    <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium">{c.name}</td>
-                      <td className="py-3 px-4">{c.doctor_count}</td>
-                      <td className="py-3 px-4">{c.patient_count}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">
-                          {c.waiting_count}
-                        </span>
+              <table className="w-full min-w-[760px]">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-sm text-gray-500">
+                    <SortableHeader label="Clinic" sortKey="name" tableState={clinicTable} onSort={(next) => setClinicTable((current) => ({ ...current, ...next }))} />
+                    <SortableHeader label="Location" sortKey="city_name" tableState={clinicTable} onSort={(next) => setClinicTable((current) => ({ ...current, ...next }))} />
+                    <SortableHeader label="Doctors" sortKey="doctor_count" tableState={clinicTable} onSort={(next) => setClinicTable((current) => ({ ...current, ...next }))} />
+                    <SortableHeader label="Patients" sortKey="patient_count" tableState={clinicTable} onSort={(next) => setClinicTable((current) => ({ ...current, ...next }))} />
+                    <SortableHeader label="Waiting" sortKey="waiting_count" tableState={clinicTable} onSort={(next) => setClinicTable((current) => ({ ...current, ...next }))} />
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clinicRows.rows.map((clinic) => (
+                    <tr key={clinic.id} className="border-b border-gray-100 text-sm">
+                      <td className="px-4 py-3 font-semibold text-gray-900">{clinic.name}</td>
+                      <td className="px-4 py-3">{clinic.city_name}, {clinic.province}</td>
+                      <td className="px-4 py-3">{clinic.doctor_count}</td>
+                      <td className="px-4 py-3">{clinic.patient_count}</td>
+                      <td className="px-4 py-3">{clinic.waiting_count}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          className="rounded-lg bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-200"
+                          onClick={() => {
+                            setClinicEditor(clinic);
+                            setClinicForm({
+                              name: clinic.name || '',
+                              location: clinic.location || '',
+                              city_id: String(clinic.city_id || ''),
+                              status: clinic.status || 'active',
+                              operating_hours: clinic.operating_hours || createOperatingHours(),
+                            });
+                            setActiveTab('clinics');
+                          }}
+                        >
+                          Edit
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
+            <Pagination page={clinicRows.page} totalPages={clinicRows.totalPages} onChange={(page) => setClinicTable((current) => ({ ...current, page }))} />
+          </Panel>
 
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">Doctor Performance</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead><tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-3 px-4">Doctor</th>
-                  <th className="text-left py-3 px-4">Assigned Clinic</th>
-                  <th className="text-left py-3 px-4">Attended</th>
-                  <th className="text-left py-3 px-4">Current Queue</th>
-                  <th className="text-left py-3 px-4">Missed Shifts</th>
-                </tr></thead>
-                <tbody id="admin-doctor-stats">
-                  {doctorStats.map(d => (
-                    <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium">{d.name}</td>
-                      <td className="py-3 px-4">{d.clinic_name}</td>
-                      <td className="py-3 px-4">{d.attended}</td>
-                      <td className="py-3 px-4">{d.current_queue}</td>
-                      <td className="py-3 px-4">{d.missed_shifts_count || 0}</td>
+          <div className="grid gap-6 xl:grid-cols-3">
+            <Panel title="Clinic Performance" actions={(
+              <input type="text" value={reportPerformanceTable.query} onChange={(event) => setReportPerformanceTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search clinics" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+            )}>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px]">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-left text-sm text-gray-500">
+                      <SortableHeader label="Clinic" sortKey="name" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
+                      <SortableHeader label="Doctors" sortKey="doctor_count" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
+                      <SortableHeader label="Receptionists" sortKey="receptionist_count" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
+                      <SortableHeader label="Waiting" sortKey="waiting_count" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
+                      <SortableHeader label="Completed" sortKey="completed_count" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
+                      <SortableHeader label="Cancelled" sortKey="cancelled_count" tableState={reportPerformanceTable} onSort={(next) => setReportPerformanceTable((current) => ({ ...current, ...next }))} />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══ STAFF MANAGEMENT TAB ═══ */}
-      {activeTab === 'staff-management' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex gap-2 mb-6 border-b border-gray-200 pb-4 flex-wrap">
-            <SubBtn id="assignments" current={staffSubTab} onClick={setStaffSubTab} label="Staff Assignments" />
-            <SubBtn id="clinic"      current={staffSubTab} onClick={setStaffSubTab} label="Create Clinic" />
-            <SubBtn id="receptionist" current={staffSubTab} onClick={setStaffSubTab} label="Add Receptionist" />
-            <SubBtn id="doctor"      current={staffSubTab} onClick={setStaffSubTab} label="Add Doctor" />
-          </div>
-
-          {/* Assignments */}
-          {staffSubTab === 'assignments' && (
-            <div>
-              <div className="mb-6 flex gap-3">
-                <input type="text" onChange={e => searchStaff(e.target.value)}
-                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
-                  placeholder="Search by name, username, or clinic..." />
-                <select onChange={e => {
-                  const spec = e.target.value;
-                  setFilteredDoctors(doctors.filter(d => !spec || d.specialization === spec));
-                }} className="w-72 px-4 py-3 border border-gray-300 rounded-lg">
-                  <option value="">All specializations</option>
-                  {specs.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
-              </div>
-              <div className="bg-white rounded-lg border p-4 mb-6">
-                <h4 className="font-bold text-gray-800 mb-4">Receptionists</h4>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead><tr className="border-b-2 border-gray-200">
-                      <th className="text-left py-3 px-4">Name</th>
-                      <th className="text-left py-3 px-4">Username</th>
-                      <th className="text-left py-3 px-4">Email</th>
-                      <th className="text-left py-3 px-4">Assigned Clinic</th>
-                    </tr></thead>
-                    <tbody id="staff-receptionists">
-                      {filteredReceps.map(r => (
-                        <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">{r.name}</td>
-                          <td className="py-3 px-4">{r.username || '-'}</td>
-                          <td className="py-3 px-4">{r.email || '-'}</td>
-                          <td className="py-3 px-4">{r.clinic_name}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="bg-white rounded-lg border p-4">
-                <h4 className="font-bold text-gray-800 mb-4">Doctors</h4>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead><tr className="border-b-2 border-gray-200">
-                      <th className="text-left py-3 px-4">Name</th>
-                      <th className="text-left py-3 px-4">Username</th>
-                      <th className="text-left py-3 px-4">Email</th>
-                      <th className="text-left py-3 px-4">Assigned Clinic</th>
-                    </tr></thead>
-                    <tbody id="staff-doctors">
-                      {filteredDoctors.map(d => (
-                        <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">{d.name}</td>
-                          <td className="py-3 px-4">{d.username || '-'}</td>
-                          <td className="py-3 px-4">{d.email || '-'}</td>
-                          <td className="py-3 px-4">{d.clinic_name}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Create Clinic */}
-          {staffSubTab === 'clinic' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Create New Clinic</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Clinic Name *</label>
-                  <input type="text" id="admin-clinic-name" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Shifa Medical Center" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Location Address *</label>
-                  <input type="text" id="admin-clinic-location" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="F-7, Islamabad" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Select City *</label>
-                  <select id="admin-clinic-city" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select a city...</option>
-                    {cities.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} — {c.sub_region}, {c.province}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">Cities are grouped by Province → Sub-Region</p>
-                </div>
-              </div>
-              <button onClick={async () => {
-                const name     = document.getElementById('admin-clinic-name').value.trim();
-                const location = document.getElementById('admin-clinic-location').value.trim();
-                const city_id  = document.getElementById('admin-clinic-city').value;
-                if (!name || !location || !city_id) { showMsg('Please fill all clinic fields', false); return; }
-                try {
-                  await createClinic({ name, location, company_id, city_id: parseInt(city_id) });
-                  showMsg('Clinic created successfully!');
-                  loadDashboard();
-                } catch (e) { showMsg(e.response?.data?.detail || 'Failed to create clinic', false); }
-              }} className="px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
-                Create Clinic
-              </button>
-            </div>
-          )}
-
-          {/* Add Receptionist */}
-          {staffSubTab === 'receptionist' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Add Receptionist Account</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <FInput label="Full Name *"  id="admin-recep-name"     placeholder="Sarim Khan" />
-                <FInput label="Username *"   id="admin-recep-username" placeholder="sarim.khan" />
-                <FInput label="Email *"      id="admin-recep-email"    type="email" placeholder="sarim@clinic.pk" />
-                <FInput label="Password *"   id="admin-recep-password" type="password" placeholder="Enter password" />
-                <FInput label="Contact *"    id="admin-recep-contact"  placeholder="+92 300-1234567" defaultValue="+92 " />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Assign to Clinic *</label>
-                  <select id="admin-recep-clinic" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select clinic...</option>
-                    {clinics.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <button onClick={async () => {
-                const g = id => document.getElementById(id)?.value || '';
-                try {
-                  await createReceptionist({ name: g('admin-recep-name'), username: g('admin-recep-username'), email: g('admin-recep-email'), password: g('admin-recep-password'), contact: g('admin-recep-contact'), clinic_id: g('admin-recep-clinic') });
-                  showMsg('Receptionist account created successfully!');
-                } catch (e) { showMsg(e.response?.data?.detail || 'Failed', false); }
-              }} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
-                Create Receptionist Account
-              </button>
-            </div>
-          )}
-
-          {/* Add Doctor */}
-          {staffSubTab === 'doctor' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Add Doctor Account</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <FInput label="Full Name *"       id="admin-doctor-name"     placeholder="Ahmed Ali" />
-                <FInput label="Username *"        id="admin-doctor-username" placeholder="ahmed.ali" />
-                <FInput label="Email *"           id="admin-doctor-email"    type="email" placeholder="ahmed.ali@clinic.pk" />
-                <FInput label="Password *"        id="admin-doctor-password" type="password" placeholder="Enter password" />
-                <FInput label="License Number *"  id="admin-doctor-license"  placeholder="PMC-12345" />
-                <FInput label="Contact *"         id="admin-doctor-contact"  placeholder="+92 300-1234567" defaultValue="+92 " />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Assign to Clinic *</label>
-                  <select id="admin-doctor-clinic" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select clinic...</option>
-                    {clinics.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <label className="mt-3 block text-sm font-medium text-gray-700">Specialization *</label>
-                  <select id="admin-doctor-specialization" className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-1">
-                    <option value="">Select specialization...</option>
-                    {specs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  {DAYS.map(day => (
-                    <div key={day} className="mb-3">
-                      <label className="block text-sm font-medium text-gray-700 mb-1 capitalize">{day} Hours</label>
-                      <div className="flex gap-2 items-center">
-                        <input type="time" id={`admin-doctor-start-time-${day}`} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
-                        <span className="text-gray-600">to</span>
-                        <input type="time" id={`admin-doctor-end-time-${day}`} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <button onClick={async () => {
-                const g = id => document.getElementById(id)?.value || '';
-                const startTimes = DAYS.map(d => g(`admin-doctor-start-time-${d}`) || null);
-                const endTimes   = DAYS.map(d => g(`admin-doctor-end-time-${d}`) || null);
-                try {
-                  await createDoctor({ name: g('admin-doctor-name'), username: g('admin-doctor-username'), email: g('admin-doctor-email'), password: g('admin-doctor-password'), license_number: g('admin-doctor-license'), contact: g('admin-doctor-contact'), clinic_id: g('admin-doctor-clinic'), specialization_id: parseInt(g('admin-doctor-specialization')), startTimes, endTimes });
-                  showMsg('Doctor account created successfully!');
-                } catch (e) { showMsg(e.response?.data?.detail || 'Failed', false); }
-              }} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
-                Create Doctor Account
-              </button>
-
-              <hr className="my-8" />
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Edit Doctor Availability</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <FInput label="Doctor ID *" id="edit-doctor-id" type="number" placeholder="Enter doctor ID" />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Day *</label>
-                  <select id="edit-doctor-day" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select day...</option>
-                    {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d,i) => (
-                      <option key={d} value={i+1}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-                <FInput label="New Start Time *" id="edit-doctor-start-time" type="time" />
-                <FInput label="New End Time *"   id="edit-doctor-end-time"   type="time" />
-              </div>
-              <button onClick={async () => {
-                const g = id => document.getElementById(id)?.value || '';
-                const doctorId = g('edit-doctor-id');
-                const day_of_week = g('edit-doctor-day');
-                const startTime = g('edit-doctor-start-time');
-                const endTime   = g('edit-doctor-end-time');
-                if (!doctorId || !day_of_week) { showMsg('Please fill all fields', false); return; }
-                try {
-                  await updateDoctorAvailability(doctorId, { day_of_week, startTime, endTime });
-                  showMsg("Doctor's availability updated successfully!");
-                } catch (e) { showMsg('Update failed', false); }
-              }} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-                Update Availability
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══ DOCTORS TAB ═══ */}
-      {activeTab === 'doctors' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex gap-2 mb-6 border-b border-gray-200 pb-4 flex-wrap">
-            <SubBtn id="available"      current={doctorSubTab} onClick={handleDoctorSubTab} label="Available Now" />
-            <SubBtn id="unavailable"    current={doctorSubTab} onClick={handleDoctorSubTab} label="Unavailable" />
-            <SubBtn id="transfer"       current={doctorSubTab} onClick={d => setDoctorSubTab(d)} label="Transfer Doctor" />
-            <SubBtn id="unavailability" current={doctorSubTab} onClick={handleDoctorSubTab} label="Unavailability Requests" />
-          </div>
-
-          {doctorSubTab === 'available' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Available Doctors Right Now</h4>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead><tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4">Name</th>
-                    <th className="text-left py-3 px-4">Shift End</th>
-                    <th className="text-left py-3 px-4">Current Queue</th>
-                    <th className="text-left py-3 px-4">Assigned Clinic</th>
-                  </tr></thead>
-                  <tbody id="available-doctors">
-                    {availDoctors.length === 0 && <tr><td colSpan="4" className="text-center py-8 text-gray-500">No doctors available right now</td></tr>}
-                    {availDoctors.map(d => (
-                      <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 font-medium">{d.name}</td>
-                        <td className="py-3 px-4">{d.shift_end || '-'}</td>
-                        <td className="py-3 px-4">{d.current_queue}</td>
-                        <td className="py-3 px-4">{d.clinic_name}</td>
+                  </thead>
+                  <tbody>
+                    {reportPerformanceRows.rows.map((item) => (
+                      <tr key={item.id || item.clinic_id} className="border-b border-gray-100 text-sm">
+                        <td className="px-4 py-3 font-semibold text-gray-900">{item.clinic_name || item.name}</td>
+                        <td className="px-4 py-3">{item.doctor_count}</td>
+                        <td className="px-4 py-3">{item.receptionist_count}</td>
+                        <td className="px-4 py-3">{item.waiting_count}</td>
+                        <td className="px-4 py-3">{item.completed_count}</td>
+                        <td className="px-4 py-3">{item.cancelled_count}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+              <Pagination page={reportPerformanceRows.page} totalPages={reportPerformanceRows.totalPages} onChange={(page) => setReportPerformanceTable((current) => ({ ...current, page }))} />
+            </Panel>
 
-          {doctorSubTab === 'unavailable' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Currently Unavailable Doctors</h4>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead><tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4">Name</th>
-                    <th className="text-left py-3 px-4">Clinic</th>
-                    <th className="text-left py-3 px-4">Unavailable From</th>
-                    <th className="text-left py-3 px-4">Unavailable Until</th>
-                    <th className="text-left py-3 px-4">Reason</th>
-                  </tr></thead>
-                  <tbody id="unavailable-doctors">
-                    {unavailDoctors.length === 0 && <tr><td colSpan="5" className="text-center py-8 text-gray-500">No unavailable doctors</td></tr>}
-                    {unavailDoctors.map(d => (
-                      <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 font-medium">{d.name}</td>
-                        <td className="py-3 px-4">{d.clinic_name}</td>
-                        <td className="py-3 px-4">-</td><td className="py-3 px-4">-</td><td className="py-3 px-4">-</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <Panel title="Appointment Reports" actions={(
+              <input type="text" value={reportAppointmentTable.query} onChange={(event) => setReportAppointmentTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search reports" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+            )}>
+              <div className="space-y-3">
+                {reportAppointmentRows.rows.map((item) => (
+                  <MiniCard key={`${item.clinic_id}-${item.status}`} title={item.clinic_name} subtitle={`${item.status}: ${item.total}`} />
+                ))}
               </div>
-            </div>
-          )}
+              <Pagination page={reportAppointmentRows.page} totalPages={reportAppointmentRows.totalPages} onChange={(page) => setReportAppointmentTable((current) => ({ ...current, page }))} />
+            </Panel>
 
-          {doctorSubTab === 'transfer' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Transfer Doctor Between Clinics</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Doctor *</label>
-                  <select id="admin-transfer-doctor" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select doctor...</option>
-                    {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">New Clinic *</label>
-                  <select id="admin-transfer-clinic" className="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">Select clinic...</option>
-                    {clinics.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
+            <Panel title="Complaint Reports" actions={(
+              <input type="text" value={reportComplaintTable.query} onChange={(event) => setReportComplaintTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search reports" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+            )}>
+              <div className="space-y-3">
+                {reportComplaintRows.rows.map((item) => (
+                  <MiniCard key={`${item.clinic_id}-${item.status}`} title={item.clinic_name} subtitle={`${item.status}: ${item.total}`} />
+                ))}
               </div>
-              <button onClick={async () => {
-                const doctorId = document.getElementById('admin-transfer-doctor')?.value;
-                const clinicId = document.getElementById('admin-transfer-clinic')?.value;
-                if (!doctorId || !clinicId) { showMsg('Select doctor and new clinic', false); return; }
-                try {
-                  await transferDoctor({ doctor_id: doctorId, new_clinic_id: clinicId });
-                  showMsg('Doctor transferred successfully!');
-                } catch (e) { showMsg('Transfer failed', false); }
-              }} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-                Transfer Doctor
+              <Pagination page={reportComplaintRows.page} totalPages={reportComplaintRows.totalPages} onChange={(page) => setReportComplaintTable((current) => ({ ...current, page }))} />
+            </Panel>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === 'staff' ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Panel title="Doctors" actions={(
+            <div className="flex flex-wrap gap-3">
+              <input type="text" value={doctorTable.query} onChange={(event) => setDoctorTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search doctors" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+              <button
+                type="button"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark"
+                onClick={() => {
+                  setDoctorEditor(null);
+                  setDoctorForm(EMPTY_DOCTOR);
+                  setDoctorErrors({});
+                  setDoctorFormOpen(true);
+                }}
+              >
+                Add Doctor
               </button>
             </div>
-          )}
-
-          {doctorSubTab === 'unavailability' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Doctor Unavailability Requests</h4>
-              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-blue-800"><i className="fas fa-info-circle mr-2"></i>Review and manage doctor unavailability requests.</p>
-              </div>
-              <div className="space-y-4" id="admin-unavailability-requests-list">
-                {unavailReqs.length === 0 && <p className="text-gray-500 text-center py-8">No pending requests.</p>}
-                {unavailReqs.map(r => (
-                  <div key={r.id} className="border border-gray-200 rounded-xl p-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-bold text-gray-800">{r.doctor_name} — {r.clinic_name}</p>
-                        <p className="text-sm text-gray-500">{new Date(r.start_datetime).toLocaleDateString()} → {new Date(r.end_datetime).toLocaleDateString()}</p>
-                        <p className="text-sm text-gray-600">{r.reason}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={async () => { await approveUnavailability(r.id, admin_id); showMsg('Approved.'); loadUnavailReqs(); }}
-                          className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Approve</button>
-                        <button onClick={async () => { const reason = prompt('Rejection reason:'); if (!reason) return; await rejectUnavailability(r.id, admin_id, reason); showMsg('Rejected.'); loadUnavailReqs(); }}
-                          className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Reject</button>
+          )}>
+            <div className="space-y-3">
+              {doctorRows.rows.map((doctor) => (
+                <div key={doctor.id} className="rounded-xl border border-gray-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-900">{doctor.name}</p>
+                      <p className="text-sm text-gray-500">{doctor.username} • {doctor.clinic_name}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <DoctorAvailabilityBadge status={doctor.availability_status} label={doctor.availability_label} />
+                        {doctor.scheduled_start_time && doctor.scheduled_end_time ? (
+                          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
+                            Today: {formatTimeWindow(doctor.scheduled_start_time, doctor.scheduled_end_time)}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
+                            No schedule saved for today
+                          </span>
+                        )}
                       </div>
                     </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-200"
+                        onClick={() => {
+                          setDoctorEditor(doctor);
+                          setDoctorForm({
+                            name: doctor.name || '',
+                            username: doctor.username || '',
+                            email: sanitizeEmailInput(doctor.email || ''),
+                            password: '',
+                            contact: sanitizePhoneInput(doctor.contact || ''),
+                            clinic_id: String(doctor.clinic_id || ''),
+                            license_number: doctor.license_number || '',
+                            specialization_id: doctor.specialization_id ? String(doctor.specialization_id) : '',
+                          });
+                          setDoctorErrors({});
+                          setDoctorFormOpen(true);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className={`rounded-lg px-3 py-2 text-xs font-semibold ${doctor.status === 'active' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                        onClick={() => setConfirmState({
+                          title: `${doctor.status === 'active' ? 'Deactivate' : 'Activate'} ${doctor.name}?`,
+                          message: 'This changes the doctor profile status without deleting any appointment history.',
+                          confirmLabel: doctor.status === 'active' ? 'Deactivate Doctor' : 'Activate Doctor',
+                          onConfirm: async () => {
+                            await updateDoctorStatus(doctor.id, doctor.status === 'active' ? 'inactive' : 'active');
+                            await loadBaseData();
+                            setConfirmState(null);
+                            pushToast({ title: 'Doctor status updated', message: `${doctor.name} is now ${doctor.status === 'active' ? 'inactive' : 'active'}.` });
+                          },
+                        })}
+                      >
+                        {doctor.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Pagination page={doctorRows.page} totalPages={doctorRows.totalPages} onChange={(page) => setDoctorTable((current) => ({ ...current, page }))} />
+          </Panel>
+
+          <Panel title="Receptionists" actions={(
+            <div className="flex flex-wrap gap-3">
+              <input type="text" value={receptionistTable.query} onChange={(event) => setReceptionistTable((current) => ({ ...current, query: event.target.value, page: 1 }))} placeholder="Search receptionists" className="rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+              <button
+                type="button"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark"
+                onClick={() => {
+                  setReceptionistEditor(null);
+                  setReceptionistForm(EMPTY_RECEPTIONIST);
+                  setReceptionistErrors({});
+                  setReceptionistFormOpen(true);
+                }}
+              >
+                Add Receptionist
+              </button>
+            </div>
+          )}>
+            <div className="space-y-3">
+              {receptionistRows.rows.map((receptionist) => (
+                <div key={receptionist.id} className="rounded-xl border border-gray-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-900">{receptionist.name}</p>
+                      <p className="text-sm text-gray-500">{receptionist.username} • {receptionist.clinic_name}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-200"
+                        onClick={() => {
+                          setReceptionistEditor(receptionist);
+                          setReceptionistForm({
+                            name: receptionist.name || '',
+                            username: receptionist.username || '',
+                            email: sanitizeEmailInput(receptionist.email || ''),
+                            password: '',
+                            contact: sanitizePhoneInput(receptionist.contact || ''),
+                            clinic_id: String(receptionist.clinic_id || ''),
+                          });
+                          setReceptionistErrors({});
+                          setReceptionistFormOpen(true);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className={`rounded-lg px-3 py-2 text-xs font-semibold ${receptionist.status === 'active' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                        onClick={() => setConfirmState({
+                          title: `${receptionist.status === 'active' ? 'Deactivate' : 'Activate'} ${receptionist.name}?`,
+                          message: 'This changes receptionist access without deleting clinic history.',
+                          confirmLabel: receptionist.status === 'active' ? 'Deactivate Receptionist' : 'Activate Receptionist',
+                          onConfirm: async () => {
+                            await updateReceptionistStatus(receptionist.id, receptionist.status === 'active' ? 'inactive' : 'active');
+                            await loadBaseData();
+                            setConfirmState(null);
+                            pushToast({ title: 'Receptionist status updated', message: `${receptionist.name} is now ${receptionist.status === 'active' ? 'inactive' : 'active'}.` });
+                          },
+                        })}
+                      >
+                        {receptionist.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Pagination page={receptionistRows.page} totalPages={receptionistRows.totalPages} onChange={(page) => setReceptionistTable((current) => ({ ...current, page }))} />
+          </Panel>
+        </div>
+      ) : null}
+
+      {activeTab === 'clinics' ? (
+        <Panel title={clinicEditor ? 'Edit Clinic Settings' : 'Create Clinic'}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Clinic Name" value={clinicForm.name} error={clinicErrors.name} onChange={(value) => setClinicForm((current) => ({ ...current, name: value }))} />
+            <Field label="Location" value={clinicForm.location} error={clinicErrors.location} onChange={(value) => setClinicForm((current) => ({ ...current, location: value }))} />
+            <SelectField label="City / Region" value={clinicForm.city_id} error={clinicErrors.city_id} onChange={(value) => setClinicForm((current) => ({ ...current, city_id: value }))} options={cities.map((city) => [String(city.id), `${city.name} • ${city.sub_region}, ${city.province}`])} />
+            <SelectField label="Status" value={clinicForm.status} onChange={(value) => setClinicForm((current) => ({ ...current, status: value }))} options={[['active', 'Active'], ['inactive', 'Inactive']]} />
+          </div>
+          <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="mb-4">
+              <h4 className="text-base font-semibold text-gray-900">Operating Hours</h4>
+              <p className="mt-1 text-sm text-gray-500">Leave both fields empty to mark a day as closed.</p>
+            </div>
+            <div className="space-y-3">
+              {WEEKDAY_LABELS.map((day) => (
+                <div key={day} className="grid gap-3 rounded-xl bg-white p-3 md:grid-cols-[160px_1fr_1fr]">
+                  <div className="flex items-center text-sm font-semibold text-gray-700">{day}</div>
+                  <Field
+                    label="Open"
+                    type="time"
+                    value={clinicForm.operating_hours?.[day]?.open || ''}
+                    error={clinicErrors[`operating_hours_${day}`]}
+                    onChange={(value) => setClinicForm((current) => ({
+                      ...current,
+                      operating_hours: {
+                        ...current.operating_hours,
+                        [day]: { ...(current.operating_hours?.[day] || { open: '', close: '' }), open: value },
+                      },
+                    }))}
+                  />
+                  <Field
+                    label="Close"
+                    type="time"
+                    value={clinicForm.operating_hours?.[day]?.close || ''}
+                    error={clinicErrors[`operating_hours_${day}`]}
+                    onChange={(value) => setClinicForm((current) => ({
+                      ...current,
+                      operating_hours: {
+                        ...current.operating_hours,
+                        [day]: { ...(current.operating_hours?.[day] || { open: '', close: '' }), close: value },
+                      },
+                    }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 space-y-4">
+            <InlineErrors errors={clinicErrors} />
+            <div className="flex gap-3">
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleClinicSubmit}>
+                {clinicEditor ? 'Save Clinic Changes' : 'Create Clinic'}
+              </button>
+              {clinicEditor ? (
+                <button type="button" className="rounded-lg bg-gray-100 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-200" onClick={() => {
+                  setClinicEditor(null);
+                  setClinicForm({ ...EMPTY_CLINIC, operating_hours: createOperatingHours() });
+                  setClinicErrors({});
+                }}>
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Panel>
+      ) : null}
+
+      {activeTab === 'appointments' ? (
+        <Panel title="Clinic Appointments" actions={(
+          <select value={appointmentStatus} onChange={async (event) => {
+            const nextStatus = event.target.value;
+            setAppointmentStatus(nextStatus);
+            await loadAppointments(nextStatus);
+          }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
+            <option value="all">All statuses</option>
+            <option value="waiting">Waiting</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        )}>
+          <div className="space-y-3">
+            {appointments.map((appointment) => (
+              <div key={appointment.id} className="rounded-xl border border-gray-200 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">Ticket #{appointment.ticket_no} • {appointment.patient_name}</p>
+                    <p className="text-sm text-gray-500">{appointment.patient_contact} • Dr. {appointment.doctor_name} • {appointment.clinic_name}</p>
+                  </div>
+                  <StatusPill value={appointment.status} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {activeTab === 'operations' ? (
+        <div className="space-y-6">
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Panel title="Receptionist-Forwarded Unavailability Queue">
+              <div className="space-y-3">
+                {unavailabilityRequests.map((request) => (
+                  <ReviewCard
+                    key={request.id}
+                    title={request.doctor_name}
+                    subtitle={`${new Date(request.start_datetime).toLocaleDateString()} to ${new Date(request.end_datetime).toLocaleDateString()} - ${request.clinic_name}`}
+                    detail={`${request.reason}${request.receptionist_name || request.receptionist_comment ? `\n\nReceptionist review: ${request.receptionist_name || 'Clinic receptionist'}${request.receptionist_comment ? ` - ${request.receptionist_comment}` : ''}` : ''}`}
+                    onApprove={async () => {
+                      await approveUnavailability(request.id, admin_id, 'Approved in admin portal');
+                      await loadUnavailabilityQueue();
+                      pushToast({ title: 'Unavailability approved', message: `${request.doctor_name}'s request was approved.` });
+                    }}
+                    onReject={async () => {
+                      await rejectUnavailability(request.id, admin_id, 'Rejected in admin portal');
+                      await loadUnavailabilityQueue();
+                      pushToast({ title: 'Unavailability rejected', message: `${request.doctor_name}'s request was rejected.` });
+                    }}
+                  />
+                ))}
+              </div>
+            </Panel>
+            <Panel title="Region Change Queue">
+              <div className="space-y-3">
+                {regionChangeRequests.map((request) => (
+                  <ReviewCard
+                    key={request.id}
+                    title={request.doctor_name}
+                    subtitle={`${request.province} • ${request.sub_region}`}
+                    detail={request.reason}
+                    onApprove={async () => {
+                      await reviewDoctorRegionChangeRequest(request.id, { status: 'approved', reviewer_comment: 'Approved in admin portal' });
+                      await loadRegionChangeQueue();
+                      pushToast({ title: 'Region request approved', message: `${request.doctor_name}'s region request was approved.` });
+                    }}
+                    onReject={async () => {
+                      await reviewDoctorRegionChangeRequest(request.id, { status: 'rejected', reviewer_comment: 'Rejected in admin portal' });
+                      await loadRegionChangeQueue();
+                      pushToast({ title: 'Region request rejected', message: `${request.doctor_name}'s region request was rejected.` });
+                    }}
+                  />
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === 'complaints' ? (
+        <Panel title="Clinic Complaints" actions={(
+          <select value={complaintStatus} onChange={async (event) => {
+            const nextStatus = event.target.value;
+            setComplaintStatus(nextStatus);
+            await loadComplaints(nextStatus);
+          }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
+            <option value="all">All statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        )}>
+          <div className="space-y-3">
+            {complaints.map((complaint) => (
+              <div key={complaint.id} className="rounded-xl border border-gray-200 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">{complaint.title}</p>
+                    <p className="text-sm text-gray-500">{complaint.clinic_name} • {complaint.patient_name || 'No patient linked'}</p>
+                    <p className="mt-2 text-sm text-gray-700">{complaint.description}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <StatusPill value={complaint.status} />
+                    <button type="button" className="rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-200" onClick={async () => {
+                      await updateComplaintStatus(complaint.id, { status: 'resolved', resolution_note: 'Resolved in admin portal' });
+                      await loadComplaints(complaintStatus);
+                      pushToast({ title: 'Complaint resolved', message: `${complaint.title} was marked resolved.` });
+                    }}>
+                      Resolve
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {activeTab === 'communications' ? (
+        <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+          <Panel title="Post Bulletin">
+            <div className="space-y-4">
+              <Field label="Title" value={bulletinForm.title} onChange={(value) => setBulletinForm((current) => ({ ...current, title: value }))} />
+              <label className="block text-sm">
+                <span className="mb-2 block font-semibold text-gray-700">Message</span>
+                <textarea rows="6" value={bulletinForm.message} onChange={(event) => setBulletinForm((current) => ({ ...current, message: event.target.value }))} className="w-full rounded-lg border border-gray-300 px-4 py-3" />
+              </label>
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={async () => {
+                await postBulletin({ admin_id, ...bulletinForm });
+                setBulletinForm({ title: '', message: '' });
+                await loadBulletins();
+                pushToast({ title: 'Bulletin posted', message: 'The bulletin is now visible to the company.' });
+              }}>
+                Post Bulletin
+              </button>
+            </div>
+          </Panel>
+
+          <Panel title="Active Bulletins">
+            <div className="space-y-3">
+              {bulletins.map((bulletin) => (
+                <div key={bulletin.id} className="rounded-xl border border-gray-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-900">{bulletin.title}</p>
+                      <p className="mt-2 text-sm text-gray-700">{bulletin.message}</p>
+                    </div>
+                    <button type="button" className="rounded-lg bg-red-100 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-200" onClick={() => setConfirmState({
+                      title: 'Archive bulletin?',
+                      message: 'This will deactivate the bulletin for staff users.',
+                      confirmLabel: 'Archive Bulletin',
+                      onConfirm: async () => {
+                        await deleteBulletin(bulletin.id, admin_id);
+                        await loadBulletins();
+                        setConfirmState(null);
+                        pushToast({ title: 'Bulletin archived', message: `${bulletin.title} was archived.` });
+                      },
+                    })}>
+                      Archive
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      ) : null}
+
+      {doctorFormOpen ? (
+        <Modal title={doctorEditor ? 'Edit Doctor Profile' : 'Add Doctor'} onClose={resetDoctorFormState}>
+          <AutofillShield />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Doctor Name" value={doctorForm.name} error={doctorErrors.name} onChange={(value) => setDoctorForm((current) => ({ ...current, name: value }))} />
+            <Field label="Username" value={doctorForm.username} error={doctorErrors.username} onChange={(value) => setDoctorForm((current) => ({ ...current, username: value }))} />
+            <Field label="Email" type="email" inputName="doctor_create_email" autoComplete="off" placeholder="doctor@example.com" value={doctorForm.email} error={doctorErrors.email} readOnly={Boolean(doctorEditor)} onChange={(value) => setDoctorForm((current) => ({ ...current, email: sanitizeEmailInput(value) }))} />
+            <Field label="Password" type="password" inputName="doctor_create_password" autoComplete="new-password" value={doctorForm.password} error={doctorErrors.password} readOnly={Boolean(doctorEditor)} onChange={(value) => setDoctorForm((current) => ({ ...current, password: value }))} />
+            <Field label="Contact" placeholder="03001234567" inputMode="numeric" value={doctorForm.contact} error={doctorErrors.contact} onChange={(value) => setDoctorForm((current) => ({ ...current, contact: sanitizePhoneInput(value) }))} />
+            <Field label="License Number" value={doctorForm.license_number} error={doctorErrors.license_number} onChange={(value) => setDoctorForm((current) => ({ ...current, license_number: value }))} />
+            <SelectField label="Clinic" value={doctorForm.clinic_id} error={doctorErrors.clinic_id} onChange={(value) => setDoctorForm((current) => ({ ...current, clinic_id: value }))} options={clinics.map((clinic) => [String(clinic.id), clinic.name])} />
+            <SelectField label="Specialization" value={doctorForm.specialization_id} onChange={(value) => setDoctorForm((current) => ({ ...current, specialization_id: value }))} options={specializations.map((specialization) => [String(specialization.id), specialization.name])} />
+          </div>
+          {!doctorEditor ? (
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+              <div className="mb-4">
+                <h4 className="text-base font-semibold text-gray-900">Weekly Availability</h4>
+                <p className="mt-1 text-sm text-gray-500">Set each day separately. Leave both fields empty when the doctor is unavailable that day.</p>
+              </div>
+              <div className="space-y-3">
+                {WEEKDAY_LABELS.map((dayLabel, index) => (
+                  <div key={dayLabel} className="grid gap-3 rounded-xl bg-white p-3 md:grid-cols-[160px_1fr_1fr]">
+                    <div className="flex items-center text-sm font-semibold text-gray-700">{dayLabel}</div>
+                    <Field
+                      label="Start Time"
+                      type="time"
+                      value={doctorForm.startTimes[index]}
+                      error={doctorErrors[`availability_${index}`]}
+                      onChange={(value) => setDoctorForm((current) => ({
+                        ...current,
+                        startTimes: current.startTimes.map((item, itemIndex) => (itemIndex === index ? value : item)),
+                      }))}
+                    />
+                    <Field
+                      label="End Time"
+                      type="time"
+                      value={doctorForm.endTimes[index]}
+                      error={doctorErrors[`availability_${index}`]}
+                      onChange={(value) => setDoctorForm((current) => ({
+                        ...current,
+                        endTimes: current.endTimes.map((item, itemIndex) => (itemIndex === index ? value : item)),
+                      }))}
+                    />
                   </div>
                 ))}
               </div>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══ COMMUNICATIONS TAB ═══ */}
-      {activeTab === 'communications' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex gap-2 mb-6 border-b border-gray-200 pb-4 flex-wrap">
-            <SubBtn id="bulletin" current={commsSubTab} onClick={setCommsSubTab} label="Post Bulletin" />
-            <SubBtn id="password" current={commsSubTab} onClick={setCommsSubTab} label="Password Reset" />
-            <SubBtn id="contact"  current={commsSubTab} onClick={setCommsSubTab} label="Contact Change" />
-            <SubBtn id="query"    current={commsSubTab} onClick={setCommsSubTab} label="General Query" />
-          </div>
-
-          {commsSubTab === 'bulletin' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Post Health Bulletin</h4>
-              <div className="space-y-4 mb-6">
-                <FInput label="Title *" id="admin-bulletin-title" placeholder="Dengue Fever Alert" />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Message *</label>
-                  <textarea id="admin-bulletin-message" rows="4" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter bulletin message..."></textarea>
-                </div>
-              </div>
-              <button onClick={async () => {
-                const title   = document.getElementById('admin-bulletin-title')?.value?.trim();
-                const message = document.getElementById('admin-bulletin-message')?.value?.trim();
-                if (!title || !message) { showMsg('Please provide title and message', false); return; }
-                try {
-                  await postBulletin({ admin_id, title, message });
-                  showMsg('Bulletin posted successfully!');
-                  document.getElementById('admin-bulletin-title').value = '';
-                  document.getElementById('admin-bulletin-message').value = '';
-                } catch (e) { showMsg('Failed to post bulletin', false); }
-              }} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors">
-                Post Bulletin
+          ) : null}
+          <div className="mt-4 space-y-4">
+            <InlineErrors errors={doctorErrors} />
+            <div className="flex gap-3">
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleDoctorSubmit}>
+                {doctorEditor ? 'Save Doctor Changes' : 'Create Doctor'}
+              </button>
+              <button type="button" className="rounded-lg bg-gray-100 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-200" onClick={resetDoctorFormState}>
+                Cancel
               </button>
             </div>
-          )}
+          </div>
+        </Modal>
+      ) : null}
 
-          {commsSubTab === 'password' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Request Password Reset</h4>
-              <div className="space-y-4">
-                <FInput label="New Password *" id="request-new-password" type="password" placeholder="Enter new password" />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Reason for Change *</label>
-                  <textarea id="request-password-reason" rows="2" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Why do you need to change your password?"></textarea>
-                </div>
-                <button onClick={async () => {
-                  const new_password = document.getElementById('request-new-password')?.value;
-                  if (!new_password) { showMsg('Please enter new password', false); return; }
-                  try { await requestPasswordChange({ admin_id, new_password }); showMsg('Password change request submitted!'); }
-                  catch (e) { showMsg('Failed', false); }
-                }} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-                  Submit Password Reset Request
-                </button>
-              </div>
+      {receptionistFormOpen ? (
+        <Modal title={receptionistEditor ? 'Edit Receptionist' : 'Add Receptionist'} onClose={resetReceptionistFormState}>
+          <AutofillShield />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Receptionist Name" value={receptionistForm.name} error={receptionistErrors.name} onChange={(value) => setReceptionistForm((current) => ({ ...current, name: value }))} />
+            <Field label="Username" value={receptionistForm.username} error={receptionistErrors.username} onChange={(value) => setReceptionistForm((current) => ({ ...current, username: value }))} />
+            <Field label="Email" type="email" inputName="receptionist_create_email" autoComplete="off" placeholder="receptionist@example.com" value={receptionistForm.email} error={receptionistErrors.email} readOnly={Boolean(receptionistEditor)} onChange={(value) => setReceptionistForm((current) => ({ ...current, email: sanitizeEmailInput(value) }))} />
+            <Field label="Password" type="password" inputName="receptionist_create_password" autoComplete="new-password" value={receptionistForm.password} error={receptionistErrors.password} readOnly={Boolean(receptionistEditor)} onChange={(value) => setReceptionistForm((current) => ({ ...current, password: value }))} />
+            <Field label="Contact" placeholder="03001234567" inputMode="numeric" value={receptionistForm.contact} error={receptionistErrors.contact} onChange={(value) => setReceptionistForm((current) => ({ ...current, contact: sanitizePhoneInput(value) }))} />
+            <SelectField label="Clinic" value={receptionistForm.clinic_id} error={receptionistErrors.clinic_id} onChange={(value) => setReceptionistForm((current) => ({ ...current, clinic_id: value }))} options={clinics.map((clinic) => [String(clinic.id), clinic.name])} />
+          </div>
+          <div className="mt-4 space-y-4">
+            <InlineErrors errors={receptionistErrors} />
+            <div className="flex gap-3">
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleReceptionistSubmit}>
+                {receptionistEditor ? 'Save Receptionist Changes' : 'Create Receptionist'}
+              </button>
+              <button type="button" className="rounded-lg bg-gray-100 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-200" onClick={resetReceptionistFormState}>
+                Cancel
+              </button>
             </div>
-          )}
+          </div>
+        </Modal>
+      ) : null}
 
-          {commsSubTab === 'contact' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Request Contact Number Change</h4>
-              <div className="space-y-4">
-                <FInput label="New Contact Number *" id="request-new-contact" placeholder="+92 300-1234567" defaultValue="+92 " />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Reason for Change *</label>
-                  <textarea id="request-contact-reason" rows="2" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Why do you need to change your contact?"></textarea>
-                </div>
-                <button onClick={async () => {
-                  const new_contact = document.getElementById('request-new-contact')?.value;
-                  if (!new_contact) { showMsg('Please enter new contact', false); return; }
-                  try { await requestContactChange({ admin_id, new_contact }); showMsg('Contact change request submitted!'); }
-                  catch (e) { showMsg('Failed', false); }
-                }} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
-                  Submit Contact Change Request
-                </button>
-              </div>
-            </div>
-          )}
-
-          {commsSubTab === 'query' && (
-            <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-4">Send General Query/Message</h4>
-              <p className="text-sm text-gray-600 mb-4">Send any message or query to the SuperAdmin.</p>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Your Query/Message *</label>
-                  <textarea id="request-general-query" rows="4" className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Write your query or message here..."></textarea>
-                </div>
-                <button onClick={async () => {
-                  const query = document.getElementById('request-general-query')?.value?.trim();
-                  if (!query) { showMsg('Please write your query', false); return; }
-                  try { await requestGeneralQuery({ admin_id, query }); showMsg('Query submitted!'); document.getElementById('request-general-query').value = ''; }
-                  catch (e) { showMsg('Failed', false); }
-                }} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors">
-                  Submit Query
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        confirmLabel={confirmState?.confirmLabel}
+        onConfirm={confirmState?.onConfirm || (() => {})}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }
 
-function StatCard({ color, icon, label, value }) {
+function Panel({ title, actions, children }) {
   return (
-    <div className={`bg-gradient-to-br ${color} rounded-xl shadow-lg p-6 text-white transform hover:-translate-y-1 transition-transform`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-white text-opacity-80 text-sm mb-1">{label}</p>
-          <p className="text-4xl font-bold">{value ?? '-'}</p>
+    <div className="rounded-2xl bg-white p-6 shadow-lg">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+        {actions}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }) {
+  return (
+    <div className={`rounded-2xl bg-gradient-to-br ${color} p-5 text-white shadow-lg`}>
+      <p className="text-sm font-medium text-white/80">{label}</p>
+      <p className="mt-2 text-3xl font-bold">{value ?? '-'}</p>
+    </div>
+  );
+}
+
+function AutofillShield() {
+  return (
+    <div className="hidden" aria-hidden="true">
+      <input type="text" name="username" autoComplete="username" tabIndex="-1" readOnly />
+      <input type="password" name="password" autoComplete="current-password" tabIndex="-1" readOnly />
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4" onClick={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+          <button type="button" className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200" onClick={onClose}>
+            Close
+          </button>
         </div>
-        <div className="bg-white bg-opacity-20 p-4 rounded-lg">
-          <i className={`${icon} text-3xl`}></i>
-        </div>
+        {children}
       </div>
     </div>
   );
 }
 
-function FInput({ label, id, type = 'text', placeholder = '', defaultValue = '' }) {
+function Field({ label, value, onChange, error, type = 'text', readOnly = false, autoComplete = 'off', inputName, placeholder, inputMode }) {
   return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
-      <input type={type} id={id} defaultValue={defaultValue}
-        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-        placeholder={placeholder} />
+    <label className="block text-sm">
+      <span className="mb-2 block font-semibold text-gray-700">{label}</span>
+      <input type={type} name={inputName} autoComplete={autoComplete} inputMode={inputMode} placeholder={placeholder} value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} className={`w-full rounded-lg border px-4 py-3 ${error ? 'border-[#CC2229]' : 'border-gray-300'} ${readOnly ? 'bg-gray-50 text-gray-500' : ''}`} />
+      {error ? <span className="mt-1 block text-xs font-medium text-[#CC2229]">{error}</span> : null}
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, error, options }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-2 block font-semibold text-gray-700">{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className={`w-full rounded-lg border px-4 py-3 ${error ? 'border-[#CC2229]' : 'border-gray-300'}`}>
+        <option value="">Select an option</option>
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>{optionLabel}</option>
+        ))}
+      </select>
+      {error ? <span className="mt-1 block text-xs font-medium text-[#CC2229]">{error}</span> : null}
+    </label>
+  );
+}
+
+function StatusPill({ value }) {
+  const styles = value === 'active' || value === 'resolved' || value === 'approved'
+    ? 'bg-emerald-100 text-emerald-700'
+    : value === 'waiting' || value === 'open' || value === 'pending' || value === 'in_progress'
+      ? 'bg-amber-100 text-amber-700'
+      : 'bg-red-100 text-red-700';
+  return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles}`}>{value}</span>;
+}
+
+function Pagination({ page, totalPages, onChange }) {
+  return (
+    <div className="mt-4 flex items-center justify-end gap-2">
+      <button type="button" className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        Previous
+      </button>
+      <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
+      <button type="button" className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        Next
+      </button>
+    </div>
+  );
+}
+
+function MiniCard({ title, subtitle }) {
+  return (
+    <div className="rounded-xl border border-gray-200 p-4">
+      <p className="font-semibold text-gray-900">{title}</p>
+      <p className="text-sm text-gray-500">{subtitle}</p>
+    </div>
+  );
+}
+
+function DoctorAvailabilityBadge({ status, label }) {
+  const styles = status === 'online'
+    ? 'bg-emerald-100 text-emerald-700'
+    : status === 'offline'
+      ? 'bg-red-100 text-red-700'
+      : 'bg-gray-100 text-gray-600';
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${styles}`}>
+      <span className="text-[10px]">●</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function formatTimeWindow(start, end) {
+  return `${formatClock(start)} - ${formatClock(end)}`;
+}
+
+function formatClock(value) {
+  if (!value) return '-';
+  const [hours, minutes] = `${value}`.split(':');
+  const numericHours = Number(hours);
+  const suffix = numericHours >= 12 ? 'PM' : 'AM';
+  const twelveHour = numericHours % 12 || 12;
+  return `${twelveHour}:${minutes} ${suffix}`;
+}
+
+function SortableHeader({ label, sortKey, tableState, onSort }) {
+  return (
+    <th className="px-4 py-3">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 font-semibold"
+        onClick={() => onSort(nextSort(tableState.sortKey, tableState.sortDirection, sortKey))}
+      >
+        {label}
+        <span className="text-xs">{tableState.sortKey === sortKey ? (tableState.sortDirection === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
+function ReviewCard({ title, subtitle, detail, onApprove, onReject }) {
+  return (
+    <div className="rounded-xl border border-gray-200 p-4">
+      <p className="font-semibold text-gray-900">{title}</p>
+      <p className="text-sm text-gray-500">{subtitle}</p>
+      <p className="mt-2 whitespace-pre-line text-sm text-gray-700">{detail}</p>
+      <div className="mt-3 flex gap-2">
+        <button type="button" className="rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-200" onClick={onApprove}>
+          Approve
+        </button>
+        <button type="button" className="rounded-lg bg-red-100 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-200" onClick={onReject}>
+          Reject
+        </button>
+      </div>
     </div>
   );
 }

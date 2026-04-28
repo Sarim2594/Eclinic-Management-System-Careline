@@ -1,75 +1,52 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// ============================================================================
-// POSTGRESQL CONNECTION POOL
-// Replaces: database.py Database class connection_pool logic
-// ============================================================================
-
-// const pool = new Pool({
-//   host: process.env.DB_HOST,
-//   port: process.env.DB_PORT,
-//   database: process.env.DB_NAME,
-//   user: process.env.DB_USER,
-//   password: process.env.DB_PASSWORD,
-//   max: 20,        // max connections in pool (was 20 in psycopg2)
-//   min: 1,
-//   idleTimeoutMillis: 30000,
-//   connectionTimeoutMillis: 2000,
-// });
-
 const poolConfig = {
-  connectionString: process.env.DATABASE_URL,
   max: 20,
   min: 1,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 };
 
-// For local or internal Docker Postgres we don’t use SSL by default.
-// For managed DB URLs (Neon, etc.) include sslmode=require in DATABASE_URL etc.
-if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('sslmode=require')) {
+if (process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER) {
+  poolConfig.host = process.env.DB_HOST;
+  poolConfig.port = parseInt(process.env.DB_PORT || '5432', 10);
+  poolConfig.database = process.env.DB_NAME;
+  poolConfig.user = process.env.DB_USER;
+  poolConfig.password = process.env.DB_PASSWORD;
   poolConfig.ssl = false;
 } else {
-  poolConfig.ssl = { rejectUnauthorized: false };
+  poolConfig.connectionString = process.env.DATABASE_URL;
+  if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('sslmode=require')) {
+    poolConfig.ssl = false;
+  } else {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
 }
 
 const pool = new Pool(poolConfig);
+
+pool.on('connect', (client) => {
+  client.query(`SET TIME ZONE 'Asia/Karachi'`).catch((err) => {
+    console.error('Failed to set database time zone', err);
+  });
+});
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
   process.exit(-1);
 });
 
-/**
- * Execute a query with parameters.
- * Replaces: db.get_cursor() context manager pattern.
- *
- * Usage:
- *   const { rows } = await query('SELECT * FROM users WHERE id = $1', [userId]);
- */
 const query = async (text, params) => {
   const client = await pool.connect();
   try {
     const result = await client.query(text, params);
     return result;
-  } catch (err) {
-    throw err;
   } finally {
     client.release();
   }
 };
 
-/**
- * Execute multiple queries inside a single transaction.
- * Replaces: the implicit transaction in psycopg2's get_cursor() context manager.
- *
- * Usage:
- *   await transaction(async (client) => {
- *     await client.query('INSERT INTO users ...');
- *     await client.query('INSERT INTO admins ...');
- *   });
- */
 const transaction = async (callback) => {
   const client = await pool.connect();
   try {

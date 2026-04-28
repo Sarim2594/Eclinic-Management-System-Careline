@@ -10,13 +10,35 @@ const { query } = require('../db');
 /** GET /api/bulletins - All active bulletins */
 router.get('/bulletins', async (req, res) => {
   try {
-    const result = await query(
-      `SELECT b.*, c.name AS company_name
-       FROM bulletins b
-       JOIN companies c ON b.company_id = c.id
-       WHERE b.active = TRUE
-       ORDER BY b.created_at DESC`
-    );
+    let result;
+    if (req.auth.role === 'superadmin') {
+      result = await query(
+        `SELECT b.*, c.name AS company_name
+         FROM bulletins b
+         JOIN companies c ON b.company_id = c.id
+         WHERE b.active = TRUE
+         ORDER BY b.created_at DESC`
+      );
+    } else if (req.auth.role === 'admin') {
+      result = await query(
+        `SELECT b.*, c.name AS company_name
+         FROM bulletins b
+         JOIN companies c ON b.company_id = c.id
+         WHERE b.active = TRUE AND b.company_id = $1
+         ORDER BY b.created_at DESC`,
+        [req.auth.company_id]
+      );
+    } else {
+      result = await query(
+        `SELECT b.*, c.name AS company_name
+         FROM bulletins b
+         JOIN companies c ON b.company_id = c.id
+         JOIN clinics cl ON cl.company_id = c.id
+         WHERE b.active = TRUE AND cl.id = $1
+         ORDER BY b.created_at DESC`,
+        [req.auth.clinic_id]
+      );
+    }
     res.json({ bulletins: result.rows });
   } catch (err) {
     res.status(500).json({ detail: err.message });

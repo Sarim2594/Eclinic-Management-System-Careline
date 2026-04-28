@@ -21,12 +21,25 @@ router.get('/clinics', async (req, res) => {
     `;
     const params = [];
 
-    if (company_id) {
+    if (req.auth.role === 'admin') {
+      params.push(req.auth.company_id);
+      sql += ` AND cl.company_id = $${params.length}`;
+
+      params.push(req.auth.admin_id);
+      sql += `
+        AND ci.region_id IN (
+          SELECT region_id FROM admin_regions WHERE admin_id = $${params.length}
+        )
+      `;
+    } else if (req.auth.role === 'doctor' || req.auth.role === 'receptionist') {
+      params.push(req.auth.clinic_id);
+      sql += ` AND cl.id = $${params.length}`;
+    } else if (company_id) {
       params.push(company_id);
       sql += ` AND cl.company_id = $${params.length}`;
     }
 
-    if (admin_id) {
+    if (req.auth.role === 'superadmin' && admin_id) {
       params.push(admin_id);
       sql += `
         AND ci.region_id IN (
@@ -47,10 +60,25 @@ router.get('/clinics', async (req, res) => {
 router.get('/clinic/:clinic_id/company', async (req, res) => {
   const { clinic_id } = req.params;
   try {
-    const result = await query(
-      'SELECT company_id FROM clinics WHERE id = $1',
-      [clinic_id]
-    );
+    let result;
+    if (req.auth.role === 'superadmin') {
+      result = await query(
+        'SELECT company_id FROM clinics WHERE id = $1',
+        [clinic_id]
+      );
+    } else if (req.auth.role === 'admin') {
+      result = await query(
+        `SELECT company_id
+         FROM clinics
+         WHERE id = $1 AND company_id = $2`,
+        [clinic_id, req.auth.company_id]
+      );
+    } else {
+      result = await query(
+        'SELECT company_id FROM clinics WHERE id = $1 AND id = $2',
+        [clinic_id, req.auth.clinic_id]
+      );
+    }
     if (result.rows.length === 0) {
       return res.status(404).json({ detail: 'Clinic not found' });
     }

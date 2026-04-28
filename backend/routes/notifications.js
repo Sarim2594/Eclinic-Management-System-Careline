@@ -13,9 +13,13 @@ const { query } = require('../db');
  */
 router.get('/notifications/:role', async (req, res) => {
   const { role } = req.params;
-  const user_id = req.query.user_id ? parseInt(req.query.user_id) : null;
+  const authUserId = req.auth?.superadmin_id || req.auth?.admin_id || req.auth?.doctor_id || req.auth?.receptionist_id || null;
 
   try {
+    if (role !== req.auth?.role) {
+      return res.status(403).json({ detail: 'You can only read notifications for your own role' });
+    }
+
     let result;
     if (role === 'superadmin') {
       result = await query(
@@ -24,14 +28,14 @@ router.get('/notifications/:role', async (req, res) => {
          ORDER BY created_at DESC`
       );
     } else {
-      if (!user_id) {
+      if (!authUserId) {
         return res.status(400).json({ detail: 'user_id is required for non-superadmin roles' });
       }
       result = await query(
         `SELECT * FROM notifications
          WHERE recipient_type = $1 AND recipient_id = $2
          ORDER BY created_at DESC`,
-        [role, user_id]
+        [role, authUserId]
       );
     }
     res.json({ notifications: result.rows });
@@ -46,11 +50,26 @@ router.get('/notifications/:role', async (req, res) => {
  */
 router.put('/notifications/mark-read/:notification_id', async (req, res) => {
   const { notification_id } = req.params;
+  const recipientId = req.auth?.superadmin_id || req.auth?.admin_id || req.auth?.doctor_id || req.auth?.receptionist_id || null;
   try {
-    const result = await query(
-      `UPDATE notifications SET read = TRUE WHERE id = $1 RETURNING *`,
-      [notification_id]
-    );
+    let result;
+    if (req.auth?.role === 'superadmin') {
+      result = await query(
+        `UPDATE notifications
+         SET read = TRUE
+         WHERE id = $1 AND recipient_type = 'superadmin'
+         RETURNING *`,
+        [notification_id]
+      );
+    } else {
+      result = await query(
+        `UPDATE notifications
+         SET read = TRUE
+         WHERE id = $1 AND recipient_type = $2 AND recipient_id = $3
+         RETURNING *`,
+        [notification_id, req.auth.role, recipientId]
+      );
+    }
     if (result.rows.length === 0) {
       return res.status(404).json({ detail: 'Notification not found' });
     }
@@ -66,21 +85,25 @@ router.put('/notifications/mark-read/:notification_id', async (req, res) => {
  */
 router.put('/notifications/mark-all-read/:role', async (req, res) => {
   const { role } = req.params;
-  const user_id = req.query.user_id ? parseInt(req.query.user_id) : null;
+  const authUserId = req.auth?.superadmin_id || req.auth?.admin_id || req.auth?.doctor_id || req.auth?.receptionist_id || null;
 
   try {
+    if (role !== req.auth?.role) {
+      return res.status(403).json({ detail: 'You can only update notifications for your own role' });
+    }
+
     if (role === 'superadmin') {
       await query(
         `UPDATE notifications SET read = TRUE WHERE recipient_type = 'superadmin'`
       );
     } else {
-      if (!user_id) {
+      if (!authUserId) {
         return res.status(400).json({ detail: 'user_id is required for non-superadmin roles' });
       }
       await query(
         `UPDATE notifications SET read = TRUE
          WHERE recipient_type = $1 AND recipient_id = $2`,
-        [role, user_id]
+        [role, authUserId]
       );
     }
     res.json({ success: true });

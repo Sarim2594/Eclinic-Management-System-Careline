@@ -1,371 +1,636 @@
-import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  getWaitingPatients, getPastPatients, getPatientHistory,
-  recordVitals, submitDiagnosis, setDoctorInactive,
-  requestUnavailability, getDoctorUnavailabilityRequests,
+  getAllRegions,
+  getDoctorRegionChangeHistory,
+  getDoctorUnavailabilityRequests,
+  getPastPatients,
+  getPatientHistory,
+  getWaitingPatients,
+  requestDoctorRegionChange,
+  requestUnavailability,
+  submitDiagnosis,
 } from '../api';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import ConfirmDialog from '../components/ConfirmDialog';
 
-// Restores: exact tab/card structure from templates/doctor.html
-// Tabs: Waiting Patients | Your History | Unavailability Requests
+const VITAL_FIELDS = [
+  { key: 'temperature', label: 'Temperature', unit: 'F', type: 'number', min: 90, max: 110, step: '0.1' },
+  { key: 'blood_pressure', label: 'Blood Pressure', placeholder: '120/80' },
+  { key: 'pulse_rate', label: 'Pulse Rate', unit: 'bpm', type: 'number', min: 30, max: 220, step: '1' },
+  { key: 'height', label: 'Height', unit: 'cm', type: 'number', min: 30, max: 260, step: '0.1' },
+  { key: 'weight', label: 'Weight', unit: 'kg', type: 'number', min: 1, max: 400, step: '0.1' },
+  { key: 'blood_oxygen', label: 'Blood Oxygen', unit: '%', type: 'number', min: 50, max: 100, step: '1' },
+  { key: 'blood_sugar_level', label: 'Blood Sugar Level', unit: 'mg/dL', type: 'number', min: 20, max: 600, step: '1' },
+];
 
-const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+const EMPTY_VITALS = {
+  temperature: '',
+  blood_pressure: '',
+  pulse_rate: '',
+  height: '',
+  weight: '',
+  blood_oxygen: '',
+  blood_sugar_level: '',
+};
+
+const LIVE_REFRESH_MS = 15000;
 
 export default function Doctor() {
   const { user } = useAuth();
+  const { pushToast } = useToast();
   const doctor_id = user.doctor_id;
 
-  const [activeTab, setActiveTab]       = useState('waiting');
-  const [waiting, setWaiting]           = useState([]);
-  const [past, setPast]                 = useState([]);
-  const [filteredPast, setFilteredPast] = useState([]);
-  const [unavailReqs, setUnavailReqs]   = useState([]);
+  const [activeTab, setActiveTab] = useState('waiting');
+  const [waitingPatients, setWaitingPatients] = useState([]);
+  const [pastPatients, setPastPatients] = useState([]);
+  const [unavailabilityRequests, setUnavailabilityRequests] = useState([]);
+  const [regionRequests, setRegionRequests] = useState([]);
+  const [regions, setRegions] = useState([]);
   const [historyModal, setHistoryModal] = useState(null);
-  const [historyList, setHistoryList]   = useState([]);
-  const [confirmModal, setConfirmModal] = useState(null);
-  const pollingRef = useRef(null);
+  const [historyItems, setHistoryItems] = useState([]);
+  const [confirmState, setConfirmState] = useState(null);
+  const [unavailabilityForm, setUnavailabilityForm] = useState({ start_datetime: '', end_datetime: '', reason: '' });
+  const [regionForm, setRegionForm] = useState({ requested_region_id: '', reason: '' });
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStartDate, setHistoryStartDate] = useState('');
+  const [historyEndDate, setHistoryEndDate] = useState('');
 
   useEffect(() => {
-    fetchWaiting();
-    pollingRef.current = setInterval(fetchWaiting, 15000);
-    return () => clearInterval(pollingRef.current);
+    loadWaitingPatients();
+    loadPastPatients();
+    loadRequests();
+    loadRegions();
   }, []);
 
-  const fetchWaiting = async () => {
-    try {
-      const data = await getWaitingPatients(doctor_id);
-      setWaiting(data.patients || []);
-    } catch {}
+  useEffect(() => {
+    const refreshActiveTab = async () => {
+      if (activeTab === 'requests') {
+        await loadRequests();
+        return;
+      }
+
+      await Promise.all([
+        loadWaitingPatients(),
+        loadPastPatients(),
+      ]);
+    };
+
+    const interval = setInterval(() => {
+      refreshActiveTab().catch((error) => {
+        console.error('Failed to refresh doctor portal', error);
+      });
+    }, LIVE_REFRESH_MS);
+
+    return () => clearInterval(interval);
+  }, [activeTab, doctor_id]);
+
+  const loadWaitingPatients = async () => {
+    const data = await getWaitingPatients(doctor_id);
+    setWaitingPatients(data.patients || []);
   };
 
-  const handleTab = async (tab) => {
-    setActiveTab(tab);
-    if (tab === 'past') {
-      const data = await getPastPatients(doctor_id);
-      const list = data.patients || [];
-      setPast(list); setFilteredPast(list);
+  const loadPastPatients = async () => {
+    const data = await getPastPatients(doctor_id);
+    setPastPatients(data.patients || []);
+  };
+
+  const loadRequests = async () => {
+    const [unavailabilityRes, regionRes] = await Promise.all([
+      getDoctorUnavailabilityRequests(doctor_id),
+      getDoctorRegionChangeHistory(doctor_id),
+    ]);
+    setUnavailabilityRequests(unavailabilityRes.requests || []);
+    setRegionRequests(regionRes.requests || []);
+  };
+
+  const loadRegions = async () => {
+    const data = await getAllRegions();
+    setRegions(data.regions || []);
+  };
+
+  const openHistory = async (patientId, patientName) => {
+    const data = await getPatientHistory(patientId);
+    setHistoryModal({ patientName });
+    setHistoryItems(data.history || []);
+  };
+
+  const handleUnavailabilitySubmit = async () => {
+    if (!unavailabilityForm.start_datetime || !unavailabilityForm.end_datetime || !unavailabilityForm.reason.trim()) {
+      pushToast({ title: 'Request incomplete', message: 'Start, end, and reason are required.', tone: 'error' });
+      return;
     }
-    if (tab === 'unavailability') {
-      const data = await getDoctorUnavailabilityRequests(doctor_id);
-      setUnavailReqs(data.requests || []);
+
+    await requestUnavailability({ doctor_id, ...unavailabilityForm });
+    setUnavailabilityForm({ start_datetime: '', end_datetime: '', reason: '' });
+    await loadRequests();
+    pushToast({ title: 'Time-off request submitted', message: 'Your unavailability request is now pending review.' });
+  };
+
+  const handleRegionRequestSubmit = async () => {
+    if (!regionForm.requested_region_id || !regionForm.reason.trim()) {
+      pushToast({ title: 'Request incomplete', message: 'Choose a region and add a reason.', tone: 'error' });
+      return;
     }
+
+    await requestDoctorRegionChange({
+      doctor_id,
+      requested_region_id: Number(regionForm.requested_region_id),
+      reason: regionForm.reason,
+    });
+    setRegionForm({ requested_region_id: '', reason: '' });
+    await loadRequests();
+    pushToast({ title: 'Region change submitted', message: 'Your clinic-side review request has been created.' });
   };
 
-  const openHistory = async (p) => {
-    setHistoryModal(p);
-    const data = await getPatientHistory(p.patient_id);
-    setHistoryList(data.history || []);
-  };
+  const filteredPastPatients = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    return pastPatients.filter((patient) => {
+      const matchesQuery = !query || [
+        patient.registration_number,
+        patient.id,
+        patient.name,
+        patient.contact,
+        patient.cnic,
+        patient.diagnosis,
+      ].some((value) => `${value || ''}`.toLowerCase().includes(query));
 
-  const searchPast = (query) => {
-    if (!query) { setFilteredPast(past); return; }
-    const q = query.toLowerCase();
-    setFilteredPast(past.filter(p =>
-      p.name?.toLowerCase().includes(q) ||
-      p.contact?.toLowerCase().includes(q) ||
-      String(p.age)?.includes(q) ||
-      p.gender?.toLowerCase().includes(q)
-    ));
-  };
+      const visitDate = patient.last_visit ? new Date(patient.last_visit) : null;
+      if (!visitDate) return matchesQuery;
 
-  const handleSubmitUnavail = async (e) => {
-    e.preventDefault();
-    const start = document.getElementById('unavail-start-date').value;
-    const end   = document.getElementById('unavail-end-date').value;
-    const reason = document.getElementById('unavail-reason').value;
-    await requestUnavailability({ doctor_id, start_datetime: start, end_datetime: end, reason });
-    const data = await getDoctorUnavailabilityRequests(doctor_id);
-    setUnavailReqs(data.requests || []);
-    document.getElementById('unavail-start-date').value = '';
-    document.getElementById('unavail-end-date').value = '';
-    document.getElementById('unavail-reason').value = '';
-  };
-
-  const TAB_BTN = (id, label, icon) => (
-    <button
-      onClick={() => handleTab(id)}
-      id={`doctor-tab-${id}`}
-      className={`px-4 py-3 font-medium border-b-2 whitespace-nowrap ${
-        activeTab === id
-          ? 'border-primary text-primary'
-          : 'border-transparent text-gray-600 hover:border-gray-300'
-      }`}
-    >
-      <i className={`${icon} mr-2`}></i>{label}
-    </button>
-  );
+      const matchesStart = !historyStartDate || visitDate >= new Date(`${historyStartDate}T00:00:00`);
+      const matchesEnd = !historyEndDate || visitDate <= new Date(`${historyEndDate}T23:59:59`);
+      return matchesQuery && matchesStart && matchesEnd;
+    });
+  }, [pastPatients, historySearch, historyStartDate, historyEndDate]);
 
   return (
-    <div>
-      {/* Tabs */}
-      <div className="flex gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
-        {TAB_BTN('waiting', 'Waiting Patients', 'fas fa-hourglass-half')}
-        {TAB_BTN('past', 'Your History', 'fas fa-history')}
-        {TAB_BTN('unavailability', 'Unavailability Requests', 'fas fa-calendar-times')}
+    <div className="space-y-6">
+      <div className="flex gap-3 overflow-x-auto border-b border-gray-200 pb-1">
+        {[
+          ['waiting', 'fa-solid fa-hourglass-half', 'Waiting Patients'],
+          ['history', 'fa-solid fa-clock-rotate-left', 'Your History'],
+          ['requests', 'fa-solid fa-calendar-days', 'Unavailability Requests'],
+        ].map(([id, icon, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === id ? 'border-primary text-primary' : 'border-transparent text-gray-600'}`}
+            onClick={() => setActiveTab(id)}
+          >
+            <span className="inline-flex items-center gap-2">
+              <i className={`${icon} w-4 text-center`} aria-hidden="true" />
+              <span>{label}</span>
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* WAITING PATIENTS */}
-      {activeTab === 'waiting' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">My Waiting Patients</h3>
-          <div id="waiting-patients">
-            {waiting.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No patients waiting.</p>
-            ) : (
-              <div className="space-y-4">
-                {waiting.map(p => (
-                  <WaitingPatientCard
-                    key={p.id} patient={p}
-                    onViewHistory={() => openHistory(p)}
-                    onVitals={recordVitals}
-                    onConfirmDiagnosis={(appt) => setConfirmModal(appt)}
-                  />
-                ))}
-              </div>
-            )}
+      {activeTab === 'waiting' ? (
+        <Panel title="Waiting Patients">
+          <div className="space-y-4">
+            {waitingPatients.length === 0 ? <EmptyState text="No patients are waiting right now." /> : null}
+            {waitingPatients.map((patient) => (
+              <WaitingCard
+                key={patient.id}
+                patient={patient}
+                pushToast={pushToast}
+                onViewHistory={() => openHistory(patient.patient_id, patient.patient_name)}
+                onSubmitDiagnosis={(diagnosisData) => setConfirmState({
+                  title: `Submit diagnosis for ${patient.patient_name}?`,
+                  message: 'This will save the vitals, complete the consultation, and move the patient into history.',
+                  confirmLabel: 'Submit Diagnosis',
+                  onConfirm: async () => {
+                    try {
+                      await submitDiagnosis({ appointment_id: patient.id, ...diagnosisData });
+                      await Promise.all([loadWaitingPatients(), loadPastPatients()]);
+                      pushToast({ title: 'Consultation completed', message: `${patient.patient_name}'s vitals and diagnosis were saved successfully.` });
+                      setConfirmState(null);
+                    } catch (error) {
+                      pushToast({
+                        title: 'Unable to complete consultation',
+                        message: error.response?.data?.detail || 'Please review the highlighted values and try again.',
+                        tone: 'error',
+                      });
+                    }
+                  },
+                })}
+              />
+            ))}
           </div>
-        </div>
-      )}
+        </Panel>
+      ) : null}
 
-      {/* PAST PATIENTS */}
-      {activeTab === 'past' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Patients You've Diagnosed</h3>
-          <div className="mb-6">
+      {activeTab === 'history' ? (
+        <Panel title="Diagnosed Patients" actions={(
+          <div className="flex flex-wrap gap-3">
             <input
               type="text"
-              onChange={e => searchPast(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-              placeholder="Search by name, contact, age, or gender..."
+              value={historySearch}
+              onChange={(event) => setHistorySearch(event.target.value)}
+              placeholder="Search by patient ID, contact, CNIC, or diagnosis"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
             />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mt-2">Start Date</label>
-                <input type="date" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mt-2">End Date</label>
-                <input type="date" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
-              </div>
-            </div>
+            <input
+              type="date"
+              value={historyStartDate}
+              onChange={(event) => setHistoryStartDate(event.target.value)}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
+            />
+            <input
+              type="date"
+              value={historyEndDate}
+              onChange={(event) => setHistoryEndDate(event.target.value)}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
+            />
           </div>
+        )}>
           <div className="space-y-3">
-            {filteredPast.map(p => (
-              <div key={p.id} className="border border-gray-200 rounded-lg p-4 flex justify-between items-center hover:bg-gray-50">
+            {filteredPastPatients.length === 0 ? <EmptyState text="No completed patient history matches your filters." /> : null}
+            {filteredPastPatients.map((patient) => (
+              <div key={patient.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 p-4">
                 <div>
-                  <p className="font-semibold text-gray-800">{p.name}</p>
-                  <p className="text-sm text-gray-500">{p.age} yrs · {p.gender} · {p.contact}</p>
-                  <p className="text-sm text-gray-400">Last visit: {new Date(p.last_visit).toLocaleDateString()}</p>
+                  <p className="text-sm text-gray-500">{patient.registration_number || formatPatientRegistration(patient.id)}</p>
+                  <p className="font-semibold text-gray-900">{patient.name}</p>
+                  <p className="text-sm text-gray-500">{patient.contact} • {patient.gender} • {patient.age} yrs</p>
+                  <p className="text-sm text-gray-400">Last visit: {new Date(patient.last_visit).toLocaleDateString()}</p>
                 </div>
                 <button
-                  onClick={() => openHistory(p)}
-                  className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-dark transition-colors"
+                  type="button"
+                  className="rounded-lg bg-blue-100 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-200"
+                  onClick={() => openHistory(patient.id, patient.name)}
                 >
                   View History
                 </button>
               </div>
             ))}
-            {filteredPast.length === 0 && <p className="text-gray-500 text-center py-8">No results found.</p>}
           </div>
-        </div>
-      )}
+        </Panel>
+      ) : null}
 
-      {/* UNAVAILABILITY */}
-      {activeTab === 'unavailability' && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-6">Request Time Off</h3>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <p className="text-blue-800"><i className="fas fa-info-circle mr-2"></i>Submit a request for unavailability. Your admin will review and approve or reject your request.</p>
-          </div>
-          <form onSubmit={handleSubmitUnavail} className="space-y-4 mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Start Date & Time</label>
-                <input type="datetime-local" id="unavail-start-date" required className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">End Date & Time</label>
-                <input type="datetime-local" id="unavail-end-date" required className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
-              </div>
+      {activeTab === 'requests' ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Panel title="Unavailability Request">
+            <div className="space-y-4">
+              <Field label="Start Date & Time" type="datetime-local" value={unavailabilityForm.start_datetime} onChange={(value) => setUnavailabilityForm((current) => ({ ...current, start_datetime: value }))} />
+              <Field label="End Date & Time" type="datetime-local" value={unavailabilityForm.end_datetime} onChange={(value) => setUnavailabilityForm((current) => ({ ...current, end_datetime: value }))} />
+              <TextAreaField label="Reason" value={unavailabilityForm.reason} onChange={(value) => setUnavailabilityForm((current) => ({ ...current, reason: value }))} />
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleUnavailabilitySubmit}>
+                Submit Unavailability Request
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Reason (Optional)</label>
-              <textarea id="unavail-reason" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" rows="3" placeholder="e.g., Medical appointment, Family emergency, etc." />
+            <Section title="Recent Unavailability Requests">
+              {unavailabilityRequests.map((request) => (
+                <RequestCard
+                  key={request.id}
+                  title={`${new Date(request.start_datetime).toLocaleDateString()} to ${new Date(request.end_datetime).toLocaleDateString()}`}
+                  subtitle={request.reason}
+                  note={[
+                    request.receptionist_status ? `Receptionist status: ${request.receptionist_status}` : null,
+                    request.receptionist_comment ? `Receptionist note: ${request.receptionist_comment}` : null,
+                    request.admin_comment ? `Admin note: ${request.admin_comment}` : null,
+                  ].filter(Boolean).join(' | ')}
+                  status={request.status}
+                />
+              ))}
+            </Section>
+          </Panel>
+
+          <Panel title="Region Change Request">
+            <div className="space-y-4">
+              <label className="block text-sm">
+                <span className="mb-2 block font-semibold text-gray-700">Requested Region</span>
+                <select value={regionForm.requested_region_id} onChange={(event) => setRegionForm((current) => ({ ...current, requested_region_id: event.target.value }))} className="w-full rounded-lg border border-gray-300 px-4 py-3">
+                  <option value="">Select a region</option>
+                  {regions.map((region) => (
+                    <option key={region.region_id} value={region.region_id}>{region.province} • {region.sub_region}</option>
+                  ))}
+                </select>
+              </label>
+              <TextAreaField label="Reason for change" value={regionForm.reason} onChange={(value) => setRegionForm((current) => ({ ...current, reason: value }))} />
+              <button type="button" className="rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleRegionRequestSubmit}>
+                Submit Region Change
+              </button>
             </div>
-            <button type="submit" className="w-full px-4 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
-              <i className="fas fa-paper-plane mr-2"></i>Submit Request
-            </button>
-          </form>
-          <h4 className="text-lg font-bold text-gray-800 mb-4">Your Requests</h4>
+            <Section title="Recent Region Requests">
+              {regionRequests.map((request) => (
+                <RequestCard
+                  key={request.id}
+                  title={`${request.province} • ${request.sub_region}`}
+                  subtitle={request.reason}
+                  note={request.reviewer_comment}
+                  status={request.status}
+                />
+              ))}
+            </Section>
+          </Panel>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        confirmLabel={confirmState?.confirmLabel}
+        onConfirm={confirmState?.onConfirm || (() => {})}
+        onCancel={() => setConfirmState(null)}
+      />
+
+      {historyModal ? (
+        <Modal title={`${historyModal.patientName} • Appointment History`} onClose={() => setHistoryModal(null)}>
           <div className="space-y-3">
-            {unavailReqs.length === 0 && <p className="text-gray-500 text-center py-8">No requests yet.</p>}
-            {unavailReqs.map(r => (
-              <div key={r.id} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-medium text-gray-800">{new Date(r.start_datetime).toLocaleDateString()} → {new Date(r.end_datetime).toLocaleDateString()}</p>
-                    {r.reason && <p className="text-sm text-gray-500 mt-1">{r.reason}</p>}
-                    {r.admin_comment && <p className="text-sm text-gray-500 mt-1">Admin note: {r.admin_comment}</p>}
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    r.status === 'approved' ? 'bg-green-100 text-green-700'
-                    : r.status === 'rejected' ? 'bg-red-100 text-red-700'
-                    : 'bg-yellow-100 text-yellow-700'
-                  }`}>{r.status}</span>
+            {historyItems.length === 0 ? <EmptyState text="No previous history is recorded for this patient yet." /> : null}
+            {historyItems.map((item) => (
+              <div key={item.id} className="rounded-xl border border-gray-200 p-4">
+                <p className="font-semibold text-gray-900">{new Date(item.created_at).toLocaleDateString()} • {item.clinic_name}</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {formatVitals(item.vitals).map((entry) => (
+                    <p key={entry.label} className="text-sm text-gray-700"><strong>{entry.label}:</strong> {entry.value}</p>
+                  ))}
                 </div>
+                <p className="mt-2 text-sm text-gray-700"><strong>Diagnosis:</strong> {item.diagnosis || '-'}</p>
+                <p className="text-sm text-gray-700"><strong>Prescription:</strong> {item.prescription || '-'}</p>
+                {item.notes ? <p className="text-sm text-gray-700"><strong>Notes:</strong> {item.notes}</p> : null}
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* HISTORY MODAL */}
-      {historyModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h3 className="text-2xl font-bold text-gray-800">{historyModal.name} — History</h3>
-              <button onClick={() => setHistoryModal(null)} className="text-gray-500 hover:text-gray-800">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 px-6 pb-6 pt-4 space-y-4">
-              {historyList.length === 0 && <p className="text-gray-500 text-center py-8">No appointment history.</p>}
-              {historyList.map(h => (
-                <div key={h.id} className="border border-gray-200 rounded-lg p-4">
-                  <p className="font-semibold text-gray-700">{new Date(h.created_at).toLocaleDateString()} — {h.clinic_name}</p>
-                  <p className="text-sm text-gray-600 mt-1"><strong>Diagnosis:</strong> {h.diagnosis || '—'}</p>
-                  <p className="text-sm text-gray-600"><strong>Prescription:</strong> {h.prescription || '—'}</p>
-                  {h.notes && <p className="text-sm text-gray-500"><strong>Notes:</strong> {h.notes}</p>}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CONFIRM DIAGNOSIS MODAL */}
-      {confirmModal && (
-        <ConfirmDiagnosisModal
-          appointment={confirmModal}
-          onClose={() => setConfirmModal(null)}
-          onConfirm={async (diagnosisData) => {
-            await submitDiagnosis({ appointment_id: confirmModal.id, ...diagnosisData });
-            setConfirmModal(null);
-            fetchWaiting();
-          }}
-        />
-      )}
+        </Modal>
+      ) : null}
     </div>
   );
 }
 
-function WaitingPatientCard({ patient, onViewHistory, onVitals, onConfirmDiagnosis }) {
-  const [expanded, setExpanded] = useState(false);
-  const [vitals, setVitals]     = useState({ bp_systolic:'', bp_diastolic:'', temperature:'', pulse:'' });
-  const [diagnosis, setDiagnosis] = useState({ diagnosis:'', prescription:'', notes:'' });
-
+function Panel({ title, children, actions }) {
   return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden">
-      <div
-        className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50"
-        onClick={() => setExpanded(e => !e)}
-      >
+    <div className="rounded-2xl bg-white p-6 shadow-lg">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+        {actions}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div className="mt-6">
+      <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{title}</h4>
+      <div className="space-y-3">{children.length ? children : <EmptyState text="No requests yet." />}</div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, type = 'text', placeholder, min, max, step, inputMode }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-2 block font-semibold text-gray-700">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        min={min}
+        max={max}
+        step={step}
+        inputMode={inputMode}
+        className="w-full rounded-lg border border-gray-300 px-4 py-3"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({ label, value, onChange }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-2 block font-semibold text-gray-700">{label}</span>
+      <textarea rows="4" value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3" />
+    </label>
+  );
+}
+
+function StatusPill({ value }) {
+  const styles = value === 'completed' || value === 'approved'
+    ? 'bg-emerald-100 text-emerald-700'
+    : value === 'waiting' || value === 'pending'
+      ? 'bg-amber-100 text-amber-700'
+      : 'bg-red-100 text-red-700';
+  return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles}`}>{value}</span>;
+}
+
+function RequestCard({ title, subtitle, note, status }) {
+  return (
+    <div className="rounded-xl border border-gray-200 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="font-bold text-gray-800">Ticket #{patient.ticket_no} — {patient.patient_name}</p>
-          <p className="text-sm text-gray-500">{patient.age} yrs · {patient.gender} · {patient.contact}</p>
+          <p className="font-semibold text-gray-900">{title}</p>
+          <p className="text-sm text-gray-600">{subtitle}</p>
+          {note ? <p className="mt-1 text-sm text-gray-500">Review note: {note}</p> : null}
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={e => { e.stopPropagation(); onViewHistory(patient); }}
-            className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700">
-            <i className="fas fa-history mr-1"></i>History
-          </button>
-          <i className={`fas fa-chevron-${expanded ? 'up' : 'down'} text-gray-400`}></i>
-        </div>
+        <StatusPill value={status} />
       </div>
-
-      {expanded && (
-        <div className="border-t border-gray-100 p-4 bg-gray-50 space-y-4">
-          {/* Vitals */}
-          <div>
-            <h4 className="font-semibold text-gray-700 mb-3">Record Vitals</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[['bp_systolic','BP Systolic'],['bp_diastolic','BP Diastolic'],['temperature','Temp (°F)'],['pulse','Pulse']].map(([k,l]) => (
-                <div key={k}>
-                  <label className="block text-xs text-gray-500 mb-1">{l}</label>
-                  <input
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                    value={vitals[k]} onChange={e => setVitals(v => ({ ...v, [k]: e.target.value }))}
-                    placeholder={l}
-                  />
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => onVitals(patient.patient_id, vitals)}
-              className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-colors"
-            >
-              Save Vitals
-            </button>
-          </div>
-
-          {/* Diagnosis */}
-          <div>
-            <h4 className="font-semibold text-gray-700 mb-3">Diagnosis & Prescription</h4>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Diagnosis</label>
-                <textarea rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  value={diagnosis.diagnosis} onChange={e => setDiagnosis(d => ({ ...d, diagnosis: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Prescription</label>
-                <textarea rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  value={diagnosis.prescription} onChange={e => setDiagnosis(d => ({ ...d, prescription: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Notes</label>
-                <textarea rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  value={diagnosis.notes} onChange={e => setDiagnosis(d => ({ ...d, notes: e.target.value }))} />
-              </div>
-            </div>
-            <button
-              onClick={() => onConfirmDiagnosis({ ...patient, diagnosisData: diagnosis })}
-              className="mt-3 px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm transition-colors"
-            >
-              <i className="fas fa-check mr-1"></i>Submit Diagnosis
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function ConfirmDiagnosisModal({ appointment, onClose, onConfirm }) {
+function EmptyState({ text }) {
+  return <p className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">{text}</p>;
+}
+
+function Modal({ title, children, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
-        <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/>
-            </svg>
-          </div>
-          <h3 className="text-2xl font-bold text-gray-800 mb-2">Confirm Submission</h3>
-          <p className="text-gray-600">Are you sure you want to submit this diagnosis?</p>
-        </div>
-        <div className="flex gap-4">
-          <button onClick={() => onConfirm(appointment.diagnosisData)}
-            className="flex-1 px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors">
-            Yes, Submit
-          </button>
-          <button onClick={onClose}
-            className="flex-1 px-6 py-3 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium transition-colors">
-            Cancel
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4" onClick={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+          <button type="button" className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200" onClick={onClose}>
+            Close
           </button>
         </div>
+        {children}
       </div>
     </div>
   );
+}
+
+function WaitingCard({ patient, onViewHistory, onSubmitDiagnosis, pushToast }) {
+  const [expanded, setExpanded] = useState(false);
+  const [vitals, setVitals] = useState(EMPTY_VITALS);
+  const [diagnosis, setDiagnosis] = useState({ diagnosis: '', prescription: '', notes: '' });
+  const [vitalErrors, setVitalErrors] = useState({});
+  const [diagnosisErrors, setDiagnosisErrors] = useState({});
+
+  const handleSubmit = () => {
+    const nextVitalErrors = validateVitals(vitals);
+    const nextDiagnosisErrors = validateDiagnosis(diagnosis);
+    setVitalErrors(nextVitalErrors);
+    setDiagnosisErrors(nextDiagnosisErrors);
+
+    if (Object.keys(nextVitalErrors).length > 0 || Object.keys(nextDiagnosisErrors).length > 0) {
+      pushToast({
+        title: 'Consultation details need attention',
+        message: 'Enter all required vitals and complete the diagnosis details before submitting.',
+        tone: 'error',
+      });
+      return;
+    }
+
+    onSubmitDiagnosis({
+      ...diagnosis,
+      vitals: normalizeVitals(vitals),
+    });
+  };
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 px-4 py-4">
+        <div>
+          <p className="font-semibold text-gray-900">Ticket #{patient.ticket_no} • {patient.patient_name}</p>
+          <p className="text-sm text-gray-500">{patient.patient_contact} • {patient.patient_age} yrs • {patient.patient_gender}</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="rounded-lg bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-200" onClick={onViewHistory}>
+            History
+          </button>
+          <button type="button" className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-200" onClick={() => setExpanded((current) => !current)}>
+            {expanded ? 'Hide' : 'Open'}
+          </button>
+        </div>
+      </div>
+      {expanded ? (
+        <div className="grid gap-6 p-4 lg:grid-cols-2">
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-gray-700">Record vitals</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {VITAL_FIELDS.map((field) => (
+                <label key={field.key} className="block text-sm">
+                  <span className="mb-2 block font-semibold text-gray-700">{field.label}{field.unit ? ` (${field.unit})` : ''}</span>
+                  <input
+                    type={field.type || 'text'}
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    placeholder={field.placeholder}
+                    inputMode={field.type === 'number' ? 'decimal' : 'text'}
+                    value={vitals[field.key]}
+                    onChange={(event) => setVitals((current) => ({ ...current, [field.key]: event.target.value }))}
+                    className={`w-full rounded-lg border px-4 py-3 ${vitalErrors[field.key] ? 'border-[#CC2229]' : 'border-gray-300'}`}
+                  />
+                  {vitalErrors[field.key] ? <span className="mt-1 block text-xs font-medium text-[#CC2229]">{vitalErrors[field.key]}</span> : null}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500">Vitals will be saved automatically when you submit the consultation.</p>
+          </div>
+
+          <div className="space-y-3">
+            <TextAreaField label="Diagnosis" value={diagnosis.diagnosis} error={diagnosisErrors.diagnosis} onChange={(value) => setDiagnosis((current) => ({ ...current, diagnosis: value }))} />
+            <TextAreaField label="Prescription" value={diagnosis.prescription} error={diagnosisErrors.prescription} onChange={(value) => setDiagnosis((current) => ({ ...current, prescription: value }))} />
+            <TextAreaField label="Notes" value={diagnosis.notes} onChange={(value) => setDiagnosis((current) => ({ ...current, notes: value }))} />
+            <button type="button" className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white hover:bg-primary-dark" onClick={handleSubmit}>
+              Submit Diagnosis
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function validateVitals(vitals) {
+  const errors = {};
+  const temperature = toNumber(vitals.temperature);
+  const pulseRate = toNumber(vitals.pulse_rate);
+  const height = toNumber(vitals.height);
+  const weight = toNumber(vitals.weight);
+  const bloodOxygen = toNumber(vitals.blood_oxygen);
+  const bloodSugarLevel = toNumber(vitals.blood_sugar_level);
+
+  if (temperature === null || temperature < 90 || temperature > 110) {
+    errors.temperature = 'Temperature must be between 90 and 110 F.';
+  }
+  const bloodPressureError = getBloodPressureError(vitals.blood_pressure);
+  if (bloodPressureError) {
+    errors.blood_pressure = bloodPressureError;
+  }
+  if (pulseRate === null || pulseRate < 30 || pulseRate > 220) {
+    errors.pulse_rate = 'Pulse rate must be between 30 and 220 bpm.';
+  }
+  if (height === null || height < 30 || height > 260) {
+    errors.height = 'Height must be between 30 and 260 cm.';
+  }
+  if (weight === null || weight < 1 || weight > 400) {
+    errors.weight = 'Weight must be between 1 and 400 kg.';
+  }
+  if (bloodOxygen === null || bloodOxygen < 50 || bloodOxygen > 100) {
+    errors.blood_oxygen = 'Blood oxygen must be between 50 and 100%.';
+  }
+  if (bloodSugarLevel === null || bloodSugarLevel < 20 || bloodSugarLevel > 600) {
+    errors.blood_sugar_level = 'Blood sugar must be between 20 and 600 mg/dL.';
+  }
+
+  return errors;
+}
+
+function getBloodPressureError(value) {
+  const match = `${value || ''}`.trim().match(/^(\d{2,3})\/(\d{2,3})$/);
+  if (!match) return 'Use blood pressure format like 120/80.';
+  const systolic = Number(match[1]);
+  const diastolic = Number(match[2]);
+  if (systolic <= diastolic) {
+    return 'The top blood pressure number should be higher than the bottom number.';
+  }
+  if (systolic < 70 || systolic > 250 || diastolic < 40 || diastolic > 150) {
+    return 'Blood pressure looks out of range. Enter a realistic reading like 120/80.';
+  }
+  return null;
+}
+
+function validateDiagnosis(diagnosis) {
+  const errors = {};
+  if (!diagnosis.diagnosis?.trim()) {
+    errors.diagnosis = 'Enter the diagnosis before completing the consultation.';
+  }
+  if (!diagnosis.prescription?.trim()) {
+    errors.prescription = 'Enter the prescription or write "No medication prescribed".';
+  }
+  return errors;
+}
+
+function toNumber(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeVitals(vitals) {
+  return {
+    temperature: Number(vitals.temperature),
+    blood_pressure: `${vitals.blood_pressure}`.trim(),
+    pulse_rate: Number(vitals.pulse_rate),
+    height: Number(vitals.height),
+    weight: Number(vitals.weight),
+    blood_oxygen: Number(vitals.blood_oxygen),
+    blood_sugar_level: Number(vitals.blood_sugar_level),
+  };
+}
+
+function formatVitals(vitals) {
+  const values = vitals && typeof vitals === 'object' ? vitals : {};
+  return [
+    { label: 'Temperature', value: values.temperature ? `${values.temperature} F` : '-' },
+    { label: 'Blood Pressure', value: values.blood_pressure || '-' },
+    { label: 'Pulse Rate', value: values.pulse_rate ? `${values.pulse_rate} bpm` : '-' },
+    { label: 'Height', value: values.height ? `${values.height} cm` : '-' },
+    { label: 'Weight', value: values.weight ? `${values.weight} kg` : '-' },
+    { label: 'Blood Oxygen', value: values.blood_oxygen ? `${values.blood_oxygen}%` : '-' },
+    { label: 'Blood Sugar Level', value: values.blood_sugar_level ? `${values.blood_sugar_level} mg/dL` : '-' },
+  ];
+}
+
+function formatPatientRegistration(patientId) {
+  if (!patientId) return 'Patient ID unavailable';
+  return `PT-${String(patientId).padStart(6, '0')}`;
 }

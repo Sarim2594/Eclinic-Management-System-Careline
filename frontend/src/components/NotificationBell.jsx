@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getNotifications, markAllNotificationsRead } from '../api';
 
 // ============================================================================
@@ -9,13 +9,32 @@ import { getNotifications, markAllNotificationsRead } from '../api';
 export default function NotificationBell({ role, userId }) {
   const [notifications, setNotifications] = useState([]);
   const [open, setOpen] = useState(false);
+  const previousUnreadRef = useRef(0);
+  const initializedRef = useRef(false);
 
   const unread = notifications.filter(n => !n.read).length;
 
   const fetchNotifications = async () => {
     try {
       const data = await getNotifications(role, userId);
-      setNotifications(data.notifications || []);
+      const nextNotifications = data.notifications || [];
+      const nextUnread = nextNotifications.filter((notification) => !notification.read).length;
+      if (initializedRef.current && nextUnread > previousUnreadRef.current) {
+        playNotificationSound();
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('careline:notifications-updated', {
+          detail: {
+            role,
+            userId,
+            notifications: nextNotifications,
+            unread: nextUnread,
+          },
+        }));
+      }
+      previousUnreadRef.current = nextUnread;
+      initializedRef.current = true;
+      setNotifications(nextNotifications);
     } catch (err) {
       console.error('Failed to fetch notifications', err);
     }
@@ -23,13 +42,14 @@ export default function NotificationBell({ role, userId }) {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // poll every 30s
+    const interval = setInterval(fetchNotifications, 10000);
     return () => clearInterval(interval);
   }, [role, userId]);
 
   const handleMarkAllRead = async () => {
     await markAllNotificationsRead(role, userId);
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    previousUnreadRef.current = 0;
   };
 
   return (
@@ -100,4 +120,30 @@ export default function NotificationBell({ role, userId }) {
       )}
     </div>
   );
+}
+
+function playNotificationSound() {
+  if (typeof window === 'undefined') return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const audioContext = new AudioContextClass();
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(660, audioContext.currentTime + 0.18);
+
+  gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.12, audioContext.currentTime + 0.02);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.22);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.22);
+  oscillator.onended = () => {
+    audioContext.close().catch(() => {});
+  };
 }

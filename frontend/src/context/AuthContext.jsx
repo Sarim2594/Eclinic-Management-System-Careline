@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from 'react';
+import { logoutSession } from '../api';
 
 // ============================================================================
 // AUTH CONTEXT — replaces static/user_state.js
@@ -17,9 +18,17 @@ export function AuthProvider({ children }) {
     setUser(userData);
   };
 
-  const logout = () => {
-    sessionStorage.removeItem('careline_user');
-    setUser(null);
+  const logout = async () => {
+    try {
+      if (sessionStorage.getItem('careline_user')) {
+        await logoutSession();
+      }
+    } catch (error) {
+      console.error('Logout request failed', error);
+    } finally {
+      sessionStorage.removeItem('careline_user');
+      setUser(null);
+    }
   };
 
   return (

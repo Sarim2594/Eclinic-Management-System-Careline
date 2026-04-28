@@ -14,13 +14,18 @@ DB_PASSWORD=your_password_here
 APP_PORT=5000
 ```
 
-### 2. Start backend:
+### 2. Initialize the normalized database:
+```bash
+cd backend && npm install && npm run db:init
+```
+
+### 3. Start backend:
 ```bash
 cd backend && npm install && npm run dev
 ```
 Runs on **http://localhost:5000**
 
-### 3. Start frontend:
+### 4. Start frontend:
 ```bash
 cd frontend && npm install && npm start
 ```
@@ -44,12 +49,17 @@ cd careline-management-system
 docker-compose up -d --build
 ```
 
-3. **Check if services are running**:
+3. **Initialize the schema and demo data**:
+```bash
+docker compose run --rm backend npm run db:init
+```
+
+4. **Check if services are running**:
 ```bash
 docker-compose ps
 ```
 
-4. **View logs** (if needed):
+5. **View logs** (if needed):
 ```bash
 docker-compose logs -f
 ```
@@ -60,10 +70,10 @@ docker-compose logs -f
 - Database: Accessible internally on port 5432
 
 ### Environment Variables
-The docker-compose.yml includes default database credentials:
-- Database: careline
-- User: careline_user
-- Password: careline_pass
+The current Docker setup uses:
+- Database: `careline`
+- User: `sarim`
+- Password: `${DB_PASSWORD}` from the root `.env`
 
 For production, consider using Docker secrets or environment files.
 
@@ -78,13 +88,16 @@ git pull
 docker-compose up -d --build
 ```
 
-## Test Credentials
+## Demo Credentials
 | Role | Username | Password |
 |------|----------|----------|
 | Superadmin | `muhammad.yasir` | `super123` |
 | Admin | `sarim.khan` | `admin123` |
 | Doctor | `ahmed.ali` | `doc123` |
 | Receptionist | `kamran.akmal` | `recep123` |
+
+The database now comes from the migration in `backend/migrations/001_initial_redesign.js`
+and the reset/seed scripts in `backend/scripts/`.
 
 ## What Was Migrated
 - `main.py` → `backend/server.js`

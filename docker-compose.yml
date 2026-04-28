@@ -6,7 +6,7 @@ services:
     container_name: careline-db
     environment:
       POSTGRES_DB: careline
-      POSTGRES_USER: neondb_owner
+      POSTGRES_USER: sarim
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -16,20 +16,32 @@ services:
   backend:
     build: ./backend
     container_name: careline-backend
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://neondb_owner:${DB_PASSWORD}@db:5432/careline
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: careline
+      DB_USER: sarim
+      DB_PASSWORD: ${DB_PASSWORD}
       NODE_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 5000
+    depends_on:
+      - db
+    expose:
+      - "5000"
+    networks:
+      - careline-network
 
   frontend:
     build: ./frontend
     restart: always
     container_name: careline-frontend
-    expose:
-      - "80"
     depends_on:
       - backend
+    ports:
+      - "80:80"
     networks:
       - careline-network
 

@@ -1,5 +1,5 @@
-const nodemailer = require('nodemailer');
 const { query } = require('../db');
+const { sendAppEmail } = require('./emailTransport');
 require('dotenv').config();
 
 // ============================================================================
@@ -8,25 +8,14 @@ require('dotenv').config();
 // (is_active = FALSE during scheduled shift hours)
 // ============================================================================
 
-// Configure with your SMTP credentials in .env:
-//   EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM
-const transporter = nodemailer.createTransport({
-  host:   process.env.EMAIL_HOST  || 'smtp.gmail.com',
-  port:   parseInt(process.env.EMAIL_PORT || '587'),
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
 /**
  * Find doctors whose shift has started but are not active,
  * and who have waiting patients — then email their admin.
  */
 async function checkAndSendLateReminders() {
   try {
-    // Find doctors: shift started, not active, have waiting patients
+    // Find doctors whose shift started recently, who have waiting patients,
+    // and who have not logged in since that shift began.
     const result = await query(`
       SELECT
         d.id          AS doctor_id,
@@ -41,14 +30,20 @@ async function checkAndSendLateReminders() {
       JOIN clinics cl ON d.clinic_id = cl.id
       JOIN users u ON d.user_id = u.id
       LEFT JOIN appointments a ON a.doctor_id = d.id AND a.status = 'waiting'
+      LEFT JOIN audit_events ae
+        ON ae.user_id = d.user_id
+       AND ae.role = 'doctor'
+       AND ae.event_type = 'login'
+       AND ae.created_at >= CURRENT_DATE
       WHERE
-        av.is_active = FALSE
-        AND av.day_of_week % 7 = EXTRACT(DOW FROM CURRENT_DATE)
+        av.day_of_week % 7 = EXTRACT(DOW FROM CURRENT_DATE)
         AND av.start_time <= CURRENT_TIME
         AND av.start_time >= (CURRENT_TIME - INTERVAL '30 minutes')
         AND d.status = 'active'
       GROUP BY d.id, d.name, cl.name, u.email, av.start_time, av.day_of_week
       HAVING COUNT(a.id) > 0
+         AND COALESCE(MAX(ae.created_at), TIMESTAMPTZ 'epoch')
+             < (DATE_TRUNC('day', CURRENT_TIMESTAMP) + av.start_time::interval)
     `);
 
     for (const doc of result.rows) {
@@ -68,8 +63,7 @@ async function checkAndSendLateReminders() {
       if (adminResult.rows.length === 0) continue;
       const admin = adminResult.rows[0];
 
-      await transporter.sendMail({
-        from:    process.env.EMAIL_FROM || process.env.EMAIL_USER,
+      await sendAppEmail({
         to:      admin.admin_email,
         subject: `⚠️ Doctor Late Alert — ${doc.doctor_name} has not checked in`,
         html: `

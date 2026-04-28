@@ -44,14 +44,20 @@ export default function Login() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
+          <input type="text" name="username" autoComplete="username" className="hidden" tabIndex="-1" aria-hidden="true" />
+          <input type="password" name="password" autoComplete="current-password" className="hidden" tabIndex="-1" aria-hidden="true" />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Username or Email
             </label>
             <input
               type="text"
+              name="careline_username_or_email"
               required
               autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-lpignore="true"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
               placeholder="Enter username or email"
               value={form.username_or_email}
@@ -65,8 +71,10 @@ export default function Login() {
             </label>
             <input
               type="password"
+              name="careline_password"
               required
-              autoComplete="new-password"
+              autoComplete="off"
+              data-lpignore="true"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
               placeholder="Enter password"
               value={form.password}
