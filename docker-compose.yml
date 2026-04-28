@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: sarim
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_v2:/var/lib/postgresql/data
     networks:
       - careline-network
 
@@ -46,7 +46,7 @@ services:
       - careline-network
 
 volumes:
-  postgres_data:
+  postgres_data_v2:
 
 networks:
   careline-network:
